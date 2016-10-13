@@ -1,0 +1,150 @@
+#!/bin/sh
+#*****************************************************************************#
+# endurance_test - Endurance test for MMCs or USB memory sticks               #
+# Author: Tim Jaacks <tim.jaacks@garz-fricke.com>                             #
+# Copyright 2011 Garz & Fricke GmbH                                           #
+#*****************************************************************************#
+
+#*****************************************************************************#
+# Variables                                                                   #
+#*****************************************************************************#
+medium="$1"
+hours="$2"
+mbytes=""
+clusters=""
+devnode=""
+size_test=""
+files_test=""
+logfile=""
+os_version=""
+
+#*****************************************************************************#
+# Check parameters                                                            #
+#*****************************************************************************#
+if [ -z "$medium" -o -z "$hours" ]
+then
+	param_error="1"
+fi
+if [ "$medium" != "mmc" -a "$medium" != "mstick" ]
+then
+	param_error="1"
+fi
+if [ $param_error ]
+then
+	echo "Please specify a medium and a duration."
+	echo "Syntax: endurance_test <medium> <duration>"
+	echo "     medium        \"mmc\" or \"mstick\""
+	echo "     duration      number of hours to run the test"
+	exit 1
+fi
+
+#*****************************************************************************#
+# Get medium information                                                      #
+#*****************************************************************************#
+if [ $medium = "mmc" ]
+then
+	devnode="/dev/mmcblk0p1"
+else
+	devnode="/dev/sda1"
+fi
+
+mbytes=$(df -m | grep $medium | awk '{print $2}')
+if [ -z $mbytes ]
+then
+	echo "error: $medium is not mounted"
+	exit 1
+fi
+clusters=$(fsck.vfat -a $devnode | grep clusters)
+clusters=${clusters##*/}
+clusters=${clusters% clusters}
+
+#*****************************************************************************#
+# Determine test sequences                                                    #
+#*****************************************************************************#
+if [ $mbytes -lt 214 ]
+then
+	echo "error: card too small. smallest test available: 256 MB"
+	exit 1
+else
+	size_test="fwrite_$medium""_256mb"
+fi
+if [ $mbytes -gt 462 ]
+then
+	size_test="fwrite_$medium""_512mb"
+fi
+if [ $mbytes -gt 911 ]
+then
+	size_test="fwrite_$medium""_1gb"
+fi
+if [ $mbytes -gt 1811 ]
+then
+	size_test="fwrite_$medium""_2gb"
+fi
+if [ $mbytes -gt 3511 ]
+then
+	size_test="fwrite_$medium""_4gb"
+fi
+if [ $mbytes -gt 7111 ]
+then
+	size_test="fwrite_$medium""_8gb"
+fi
+
+if [ $clusters -lt 55000 ]
+then
+	echo "error: too few clusters. smallest test available: 50000 files"
+	exit 1
+else
+	files_test="fwrite_$medium""_50k_files"
+fi
+if [ $clusters -gt 105000 ]
+then
+	files_test="fwrite_$medium""_100k_files"
+fi
+# if [ $clusters -gt 1050000 ]
+# then
+	# files_test="fwrite_$medium""_1M_files"
+# fi
+
+#*****************************************************************************#
+# Determine OS version                                                        #
+#*****************************************************************************#
+os_version=$(cat /etc/init.d/banner | grep ptxdist- | awk '{print $2}')
+os_version=${os_version#\"OSELAS(R)-}
+
+#*****************************************************************************#
+# Determine logfile name                                                      #
+#*****************************************************************************#
+logfile="fwrite_$medium""_$(date +%Y-%m-%d_%H%M%S)"
+
+#*****************************************************************************#
+# Create results folder if it does not exist                                  #
+#*****************************************************************************#
+if [ ! -d /opt/ltp/results ]
+then
+	mkdir /opt/ltp/results
+fi
+
+#*****************************************************************************#
+# Write logfile header                                                        #
+#*****************************************************************************#
+echo "---------------------------------------" > /opt/ltp/results/$logfile.log
+echo " Garz & Fricke Endurance Test Protocol" >> /opt/ltp/results/$logfile.log
+echo "---------------------------------------" >> /opt/ltp/results/$logfile.log
+echo " Date:         $(date '+%d.%m.%Y, %H:%M:%S')" >> /opt/ltp/results/$logfile.log
+echo " Medium:       $medium" >> /opt/ltp/results/$logfile.log
+echo " Device:       $devnode" >> /opt/ltp/results/$logfile.log
+echo " Size:         $mbytes MB" >> /opt/ltp/results/$logfile.log
+echo " Clusters:     $clusters" >> /opt/ltp/results/$logfile.log
+echo " Sequences:    $size_test" >> /opt/ltp/results/$logfile.log
+echo "               $files_test" >> /opt/ltp/results/$logfile.log
+echo " Hours:        $hours" >> /opt/ltp/results/$logfile.log
+echo " OS Version:   $os_version" >> /opt/ltp/results/$logfile.log
+echo "---------------------------------------" >> /opt/ltp/results/$logfile.log
+echo "" >> /opt/ltp/results/$logfile.log
+echo "" >> /opt/ltp/results/$logfile.log
+
+#*****************************************************************************#
+# Run tests                                                                   #
+#*****************************************************************************#
+/opt/ltp/runtest/scripts/endurance_test_work $medium $hours $devnode $size_test \
+$files_test $logfile.log $mbytes $clusters | tee /opt/ltp/results/$logfile.screen

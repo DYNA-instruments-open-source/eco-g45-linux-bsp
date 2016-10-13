@@ -1,0 +1,15 @@
+---
+ examples/tutorials/tutorials.pro |    1 +
+ 1 file changed, 1 insertion(+)
+
+Index: qt-everywhere-opensource-src-4.7.2/examples/tutorials/tutorials.pro
+===================================================================
+--- qt-everywhere-opensource-src-4.7.2.orig/examples/tutorials/tutorials.pro
++++ qt-everywhere-opensource-src-4.7.2/examples/tutorials/tutorials.pro
+@@ -1,5 +1,6 @@
+ TEMPLATE      = subdirs
+ SUBDIRS       = \
++                widgets \
+                 addressbook \
+                 modelview
+ 

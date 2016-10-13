@@ -1,0 +1,467 @@
+Index: linux-2.6.33/drivers/input/keyboard/Kconfig
+===================================================================
+--- linux-2.6.33.orig/drivers/input/keyboard/Kconfig
++++ linux-2.6.33/drivers/input/keyboard/Kconfig
+@@ -443,4 +443,11 @@ config KEYBOARD_W90P910
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called w90p910_keypad.
+ 
++config KEYBOARD_GUFCAPACITIVEKEYPAD
++	tristate "GUFCAPACITIVE Keypad support"
++	depends on I2C
++	help
++	  To compile this driver as a module, choose M here: the
++	  module will be called gufcapacitivekeypad.
++
+ endif
+Index: linux-2.6.33/drivers/input/keyboard/Makefile
+===================================================================
+--- linux-2.6.33.orig/drivers/input/keyboard/Makefile
++++ linux-2.6.33/drivers/input/keyboard/Makefile
+@@ -15,6 +15,7 @@ obj-$(CONFIG_KEYBOARD_CORGI)		+= corgikb
+ obj-$(CONFIG_KEYBOARD_DAVINCI)		+= davinci_keyscan.o
+ obj-$(CONFIG_KEYBOARD_EP93XX)		+= ep93xx_keypad.o
+ obj-$(CONFIG_KEYBOARD_GPIO)		+= gpio_keys.o
++obj-$(CONFIG_KEYBOARD_GUFCAPACITIVEKEYPAD)		+= gufcapacitivekeypad.o
+ obj-$(CONFIG_KEYBOARD_HIL)		+= hil_kbd.o
+ obj-$(CONFIG_KEYBOARD_HIL_OLD)		+= hilkbd.o
+ obj-$(CONFIG_KEYBOARD_HP6XX)		+= jornada680_kbd.o
+Index: linux-2.6.33/drivers/input/keyboard/gufcapacitivekeypad.c
+===================================================================
+--- /dev/null
++++ linux-2.6.33/drivers/input/keyboard/gufcapacitivekeypad.c
+@@ -0,0 +1,399 @@
++/*
++ * Copyright 2010 Garz & Fricke GmbH All Rights Reserved.
++ *
++ * Author: Sakire Aytac
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor Boston, MA 02110-1301 USA
++ */
++
++#include <linux/delay.h>
++#include <linux/fs.h>
++#include <linux/gpio.h>
++#include <linux/input/gufcapacitivekeypad.h>
++#include <linux/i2c.h>
++#include <linux/init.h>
++#include <linux/input.h>
++#include <linux/interrupt.h>
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/version.h>
++
++/* Registers */
++#define HOSTREG_CHIPID                  0x00
++#define HOSTREG_VERSION                 0x01
++#define HOSTREG_KEY_STATUS_1            0x02
++#define HOSTREG_KEY_STATUS_2            0x03
++#define HOSTREG_GPIO_GPO_DRIVE_1        0x04
++#define HOSTREG_SUB_REVISION            0x05
++
++
++struct gufcapacitivekeypad_priv {
++	struct i2c_client *client;
++	struct input_dev *input;
++	struct work_struct work;
++	struct mutex mutex;
++	int irq;
++	unsigned int *keycode_list;
++	unsigned int irq_pending;
++	unsigned short key_status;
++	unsigned long irq_flags;
++};
++
++/* Helper functions */
++char inreg(struct i2c_client *client, char address)
++{
++	char cmd = address;
++	s32 value;
++    value = i2c_smbus_read_byte_data(client, cmd);
++    if (value < 0)
++    	printk(KERN_ERR "GUFCAPACITIVEKEYPAD: inreg error: %d.\n", value);
++	return (char)value;
++}
++
++void outreg(struct i2c_client *client, char address, char value)
++{
++	char cmd = address;
++	s32 ret = i2c_smbus_write_byte_data(client, cmd, value);
++	if (ret < 0)
++		printk(KERN_ERR "GUFCAPACITIVEKEYPAD: outreg error: %d.\n", value);
++}
++
++void bitset(struct i2c_client *client, char address, char bitmask)
++{
++	char value = inreg(client, address);
++	value |= bitmask;
++	outreg(client, address, value);
++}
++
++void bitclear(struct i2c_client *client, char address, char bitmask)
++{
++	char value = inreg(client, address);
++	value &= ~bitmask;
++	outreg(client, address, value);
++}
++
++#if 0
++void dumpregs(struct i2c_client *client)
++{
++	printk("----- GUFCAPACITIVEKEYPAD REGISTER DUMP ------\n");
++	printk("HOSTREG_CHIPID: 0x%x\n", inreg(client, HOSTREG_CHIPID));
++	printk("HOSTREG_VERSION: 0x%x\n", inreg(client, HOSTREG_VERSION));
++	printk("HOSTREG_GENERAL_STATUS: 0x%x\n", inreg(client, HOSTREG_GENERAL_STATUS));
++	printk("HOSTREG_KEY_STATUS_1: 0x%x\n", inreg(client, HOSTREG_KEY_STATUS_1));
++	printk("HOSTREG_KEY_STATUS_2: 0x%x\n", inreg(client, HOSTREG_KEY_STATUS_2));
++	printk("HOSTREG_GPIO_GPO_DRIVE_1: 0x%x\n", inreg(client, HOSTREG_GPIO_GPO_DRIVE_1));
++	printk("----------------------------------------------\n");
++}
++#endif
++
++/* Sysfs interface */
++static ssize_t read_led(struct device *dev, struct device_attribute *attr,
++	char *buf)
++{
++	struct gufcapacitivekeypad_priv *priv = dev_get_drvdata(dev);
++	mutex_lock(&priv->mutex);
++	snprintf(buf, 255, "%d\n", (inreg(priv->client, HOSTREG_GPIO_GPO_DRIVE_1) >> 7) & 0x1);
++	mutex_unlock(&priv->mutex);
++	return strlen(buf)+1;
++}
++
++static ssize_t write_led(struct device *dev, struct device_attribute *attr,
++	const char *buf, size_t count)
++{
++	struct gufcapacitivekeypad_priv *priv = dev_get_drvdata(dev);
++	unsigned char gpo_drive_1;
++	mutex_lock(&priv->mutex);
++	gpo_drive_1 = inreg(priv->client, HOSTREG_GPIO_GPO_DRIVE_1);
++	if (simple_strtoul(buf, NULL, 0) == 0)
++		gpo_drive_1 &= ~0x80;
++	else
++		gpo_drive_1 |= 0x80;
++	outreg(priv->client, HOSTREG_GPIO_GPO_DRIVE_1, gpo_drive_1);
++	mutex_unlock(&priv->mutex);
++	return strlen(buf)+1;
++}
++
++static DEVICE_ATTR(led, S_IRUGO|S_IWUGO, read_led, write_led);
++
++/* checks if IRQ line is low */
++static inline int gufcapacitivekeypad_irq_active(struct gufcapacitivekeypad_priv *priv)
++{
++	return gpio_get_value(irq_to_gpio(priv->irq)) == 0;
++}
++
++/* ISR and worker thread */
++static void gufcapacitivekeypad_read(struct work_struct *work)
++{
++	int i;
++	unsigned short new_key_status = 0;
++
++	struct gufcapacitivekeypad_priv *priv =
++		container_of(work, struct gufcapacitivekeypad_priv, work);
++
++	mutex_lock(&priv->mutex);
++
++	new_key_status = inreg(priv->client, HOSTREG_KEY_STATUS_1);
++	new_key_status |= inreg(priv->client, HOSTREG_KEY_STATUS_2) << 8;
++
++	if (!(priv->key_status ^ new_key_status))
++	{
++		/* None of the key states has changed, IRQ is not *
++		 * meant for us or was accidentally triggered.    */
++		if (priv->irq_pending) {
++			priv->irq_pending = 0;
++			enable_irq(priv->irq);
++		}
++		mutex_unlock(&priv->mutex);
++		return;
++	}
++
++	for (i=0; i<NUMBER_OF_KEYS; i++)
++	{
++		if (!((priv->key_status >> i) & 0x1) && ((new_key_status >> i) & 0x1))
++		{
++			/* key was not pressed but is pressed now */
++			// printk("key %d pressed\n", i);
++			input_report_key(priv->input, priv->keycode_list[i], 1);
++		}
++		if (((priv->key_status >> i) & 0x1) && !((new_key_status >> i) & 0x1))
++		{
++			/* key was pressed but is not pressed anymore */
++			// printk("key %d released\n", i);
++			input_report_key(priv->input, priv->keycode_list[i], 0);
++		}
++	}
++
++	priv->key_status = new_key_status;
++
++	if (priv->irq_pending) {
++		priv->irq_pending = 0;
++		enable_irq(priv->irq);
++	}
++
++	mutex_unlock(&priv->mutex);
++	return;
++}
++
++static irqreturn_t gufcapacitivekeypad_isr(int irq, void *dev_id)
++{
++	struct gufcapacitivekeypad_priv *priv = dev_id;
++
++	/* postpone key notification */
++	disable_irq_nosync(priv->irq);
++	priv->irq_pending = 1;
++	schedule_work(&priv->work);
++
++	if (priv->irq_flags & IRQF_SHARED)
++		return IRQ_NONE;
++	else
++		return IRQ_HANDLED;
++}
++
++/* Driver interface */
++static int gufcapacitivekeypad_open(struct input_dev *dev)
++{
++	struct gufcapacitivekeypad_priv *priv = input_get_drvdata(dev);
++
++	/* get initial key states and reset interrupt
++	   line by reading the two key status registers */
++	priv->key_status = inreg(priv->client, HOSTREG_KEY_STATUS_1);
++	priv->key_status |= inreg(priv->client, HOSTREG_KEY_STATUS_2) << 8;
++
++	return 0;
++}
++
++static void gufcapacitivekeypad_close(struct input_dev *dev)
++{
++	struct gufcapacitivekeypad_priv *priv = input_get_drvdata(dev);
++	disable_irq(priv->irq);
++	cancel_work_sync(&priv->work);
++}
++
++static int __devinit gufcapacitivekeypad_probe(struct i2c_client *client,
++				   const struct i2c_device_id *idp)
++{
++	struct gufcapacitivekeypad_priv *priv;
++	struct gufcapacitivekeypad_platform_data *pdata;
++	struct input_dev *input;
++	int err = 0;
++	char chip_id = 0;
++	unsigned char major_version = 0;
++	unsigned char minor_version = 0;
++	unsigned char sub_revision = 0;
++
++	/* check for i2c functionality */
++	if ( ! i2c_check_functionality(client->adapter, I2C_FUNC_SMBUS_BYTE_DATA) )	{
++			dev_err(&client->dev, "I2C functionality not supported\n");
++			return -EIO;
++	}
++
++	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
++	if (!priv) {
++		dev_err(&client->dev, "failed to allocate driver data\n");
++		goto err0;
++	}
++
++	mutex_init(&priv->mutex);
++
++	input = input_allocate_device();
++
++	if (!input) {
++		dev_err(&client->dev, "Failed to allocate input device.\n");
++		goto err1;
++	}
++
++	input->evbit[0] = BIT_MASK(EV_KEY);
++	bitmap_fill(input->keybit, KEY_MAX);
++
++	input->name 			= client->name;
++	input->id.bustype 		= BUS_I2C;
++	input->dev.parent 		= &client->dev;
++	input->open 			= gufcapacitivekeypad_open;
++	input->close 			= gufcapacitivekeypad_close;
++
++	/* to be corrected later */
++	input->id.vendor 		= 0x0001;
++    input->id.product 		= 0x0001;
++    input->id.version 		= 0x0100;
++
++	priv->client = client;
++	priv->input = input;
++	priv->irq = client->irq;
++	priv->irq_pending = 0;
++
++	pdata = client->dev.platform_data;
++	priv->keycode_list = pdata->keycode_list;
++	priv->irq_flags = pdata->irq_flags;
++
++	if (pdata->gufcapacitivekeypad_reset)
++		pdata->gufcapacitivekeypad_reset();
++
++	INIT_WORK(&priv->work, gufcapacitivekeypad_read);
++
++	i2c_set_clientdata(client, priv);
++	input_set_drvdata(input, priv);
++	dev_set_drvdata(&client->dev, priv);
++
++	chip_id = inreg(client, HOSTREG_CHIPID);
++	if(chip_id != 0x11) {
++		dev_err(&client->dev, "Could not read chip ID (0x11) of gufcapacitivekeypad. (is %d)\n", chip_id);
++		goto err1;
++	}
++	pr_info("GUFCAPACITIVEKEYPAD: Chip ID (0x11) sucessfully read.\n");
++
++	major_version = inreg(client, HOSTREG_VERSION) >> 4;
++	minor_version = inreg(client, HOSTREG_VERSION) & 0x0F;
++	sub_revision = inreg(client, HOSTREG_SUB_REVISION);
++	pr_info("GUFCAPACITIVEKEYPAD: Firmware version: %d.%d.%d\n", major_version, minor_version, sub_revision);
++
++	err = input_register_device(input);
++	if (err)
++		goto err1;
++
++	err = request_irq(priv->irq, gufcapacitivekeypad_isr, pdata->irq_flags,
++			  client->name, priv);
++	if (err) {
++		dev_err(&client->dev, "Unable to request gufcapacitivekeypad IRQ.\n");
++		goto err2;
++	}
++
++#if 0
++	dumpregs(client);
++#endif
++
++	device_init_wakeup(&client->dev, 0);
++
++	/* Create sysfs entry */
++	device_create_file(&input->dev, &dev_attr_led);
++
++	return 0;
++
++
++err2:
++	input_unregister_device(input);
++	input = NULL; // so we dont try to free it below
++err1:
++	input_free_device(input);
++	i2c_set_clientdata(client, NULL);
++	kfree(priv);
++err0:
++	return err;
++
++}
++
++static int __devexit gufcapacitivekeypad_remove(struct i2c_client *client)
++{
++	struct gufcapacitivekeypad_priv *priv = i2c_get_clientdata(client);
++
++	device_remove_file(&priv->input->dev, &dev_attr_led);
++	free_irq(priv->irq, priv);
++	input_unregister_device(priv->input);
++	i2c_set_clientdata(client, NULL);
++	kfree(priv);
++
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int gufcapacitivekeypad_suspend(struct i2c_client *client, pm_message_t mesg)
++{
++	return 0;
++}
++
++static int gufcapacitivekeypad_resume(struct i2c_client *client)
++{
++	return 0;
++}
++#else
++#define gufcapacitivekeypad_suspend NULL
++#define gufcapacitivekeypad_resume NULL
++#endif
++
++static const struct i2c_device_id gufcapacitivekeypad_id[] = {
++	{ "gufkeypad", 0 },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, gufcapacitivekeypad_id);
++
++static struct i2c_driver gufcapacitivekeypad_driver = {
++	.driver = {
++		.name = "gufkeypad",
++	},
++	.probe = gufcapacitivekeypad_probe,
++	.remove = __devexit_p(gufcapacitivekeypad_remove),
++	.suspend = gufcapacitivekeypad_suspend,
++	.resume = gufcapacitivekeypad_resume,
++	.id_table = gufcapacitivekeypad_id,
++};
++
++static int __init gufcapacitivekeypad_init(void)
++{
++	return i2c_add_driver(&gufcapacitivekeypad_driver);
++}
++
++static void __exit gufcapacitivekeypad_exit(void)
++{
++	i2c_del_driver(&gufcapacitivekeypad_driver);
++}
++
++// Metainformation
++MODULE_DESCRIPTION("Garz & Fricke Capacitive Keypad driver");
++MODULE_AUTHOR("Tim Jaacks <tim.jaacks@garz-fricke.de>");
++MODULE_LICENSE("GPL");
++MODULE_SUPPORTED_DEVICE("none");
++
++module_init(gufcapacitivekeypad_init);
++module_exit(gufcapacitivekeypad_exit);
+Index: linux-2.6.33/include/linux/input/gufcapacitivekeypad.h
+===================================================================
+--- /dev/null
++++ linux-2.6.33/include/linux/input/gufcapacitivekeypad.h
+@@ -0,0 +1,30 @@
++#ifndef LINUX_INPUT_GUFCAPACITIVEKEYPAD_H
++#define LINUX_INPUT_GUFCAPACITIVEKEYPAD_H
++
++#include <linux/types.h>
++#include <linux/input.h>
++
++#define NUMBER_OF_KEYS                  16
++
++/**
++ * struct matrix_keymap_data - keymap for matrix keyboards
++ * @keymap: pointer to array of uint32 values encoded with KEY() macro
++ *	representing keymap
++ * @keymap_size: number of entries (initialized) in this keymap
++ *
++ * This structure is supposed to be used by platform code to supply
++ * keymaps to drivers that implement matrix-like keypads/keyboards.
++ */
++struct gufcapacitivekeypad_data {
++	const uint32_t *keymap;
++	unsigned int	keymap_size;
++};
++
++
++struct gufcapacitivekeypad_platform_data {
++	void (*gufcapacitivekeypad_reset) (void);
++	unsigned int keycode_list[NUMBER_OF_KEYS];
++	unsigned long irq_flags;
++};
++
++#endif /* LINUX_INPUT_GUFCAPACITIVEKEYPAD_H */

@@ -1,0 +1,1082 @@
+From 4b8f38fcf57e12757c78bbd2510e278d7dbe8bc6 Mon Sep 17 00:00:00 2001
+From: Robert Schwebel <r.schwebel@pengutronix.de>
+Date: Mon, 15 Feb 2010 14:20:53 +0100
+Subject: [PATCH 52/59] imx: add support for Garz+Fricke NESO
+
+This patch adds support for the NESO board from Garz+Fricke which is a
+terminal based on the Freescale i.MX27 CPU.
+
+Signed-off-by: Robert Schwebel <r.schwebel@pengutronix.de>
+Acked-by: Juergen Beisert <jbe@pengutronix.de>
+---
+ arch/arm/mach-mx2/Kconfig         |    9 
+ arch/arm/mach-mx2/Makefile        |    1 
+ arch/arm/mach-mx2/mach-guf_neso.c |  661 ++++++++++++++++++++++++++++++++++++++
+ sound/soc/imx/Kconfig             |   11 
+ sound/soc/imx/Makefile            |    2 
+ sound/soc/imx/neso-ac97.c         |   90 +++++
+ 6 files changed, 774 insertions(+)
+ create mode 100644 arch/arm/mach-mx2/mach-guf_neso.c
+ create mode 100644 sound/soc/imx/neso-ac97.c
+
+Index: linux-2.6.33/arch/arm/mach-mx2/Kconfig
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Kconfig
++++ linux-2.6.33/arch/arm/mach-mx2/Kconfig
+@@ -34,6 +34,16 @@ config MACH_MX27ADS
+ 	  Include support for MX27ADS platform. This includes specific
+ 	  configurations for the board and its peripherals.
+ 
++config MACH_NESO
++	bool "NESO platform"
++	depends on MACH_MX27
++	select MXC_ULPI if USB_ULPI
++	select MTD_GUF_REDBOOT_PARSING
++	select SMSC_PHY
++	help
++	  Include support for Garz+Fricke NESO platform. This includes specific
++	  configurations for the board and its peripherals.
++
+ config MACH_PCM038
+ 	bool "Phytec phyCORE-i.MX27 CPU module (pcm038)"
+ 	depends on MACH_MX27
+Index: linux-2.6.33/arch/arm/mach-mx2/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Makefile
++++ linux-2.6.33/arch/arm/mach-mx2/Makefile
+@@ -15,6 +15,7 @@ obj-$(CONFIG_MACH_MX27) += clock_imx27.o
+ 
+ obj-$(CONFIG_MACH_MX21ADS) += mach-mx21ads.o
+ obj-$(CONFIG_MACH_MX27ADS) += mach-mx27ads.o
++obj-$(CONFIG_MACH_NESO) += mach-guf_neso.o
+ obj-$(CONFIG_MACH_PCM038) += mach-pcm038.o
+ obj-$(CONFIG_MACH_PCM970_BASEBOARD) += pcm970-baseboard.o
+ obj-$(CONFIG_MACH_MX27_3DS) += mach-mx27_3ds.o
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-guf_neso.c
+===================================================================
+--- /dev/null
++++ linux-2.6.33/arch/arm/mach-mx2/mach-guf_neso.c
+@@ -0,0 +1,899 @@
++/*
++ * Copyright 2007-2010 Robert Schwebel <r.schwebel@pengutronix.de>, Pengutronix
++ * Copyright (C) 2008 Juergen Beisert (kernel@pengutronix.de)
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
++ * MA 02110-1301, USA.
++ */
++
++#include <linux/delay.h>
++#include <linux/i2c.h>
++#include <linux/i2c/at24.h>
++#include <linux/io.h>
++#include <linux/leds.h>
++#include <linux/platform_device.h>
++#include <linux/ucb1400.h>
++#include <linux/spi/spi.h>
++#include <linux/irq.h>
++#include <linux/usb/otg.h>
++#include <linux/usb/ulpi.h>
++#include <linux/pwm_backlight.h>
++#include <linux/mtd/mtd.h>
++#include <linux/netdevice.h>
++#include <linux/etherdevice.h>
++#include <linux/ucb1400.h>
++#include <video/platform_lcd.h>
++#include <sound/soc.h>
++
++#include <asm/setup.h>
++#include <asm/mach/arch.h>
++#include <asm/mach-types.h>
++#include <asm/mach/time.h>
++
++#include <mach/common.h>
++#include <mach/hardware.h>
++#include <mach/iomux.h>
++#include <mach/audmux.h>
++#include <mach/i2c.h>
++#include <mach/gfeeprom.h>
++#include <mach/imx-uart.h>
++#include <mach/audmux.h>
++#include <mach/mmc.h>
++#include <mach/mxc_nand.h>
++#include <mach/spi.h>
++#include <mach/ssi.h>
++#include <mach/mxc_ehci.h>
++#include <mach/ulpi.h>
++#include <mach/imxfb.h>
++
++#include <linux/ezxml.h>
++#include <linux/string.h>
++#include <linux/vmalloc.h>
++#include <linux/guf_xml_config.h>
++#include <linux/guf_board_common.h>
++
++#include "devices.h"
++
++#define MINIMUM_REDBOOT_VERSION "1.16r2757"
++
++static guf_xml_data_private_t config;
++extern struct snd_soc_dai imx_ssi_pcm_dai[2];
++
++
++/******************************************************************************/
++/* GPIO DEFINES                                                               */
++/******************************************************************************/
++
++/* two pins are controlling the CS signals to the USB phys */
++#define USBH2_PHY_CS_GPIO (GPIO_PORTF + 20)
++#define OTG_PHY_CS_GPIO (GPIO_PORTF + 19)
++
++/* two pins are controlling the display and its backlight */
++#define LCD_POWER_GPIO (GPIO_PORTF + 18)
++#define BACKLIGHT_POWER_GPIO (GPIO_PORTE + 5)
++
++/* Audio interrupt in */
++#define AUDIO_IRQ_GPIO (GPIO_PORTC + 28)
++#define AUDIO_SPEAKER_GPIO (GPIO_PORTC + 29)	/* FIXME 1 = on? */
++#define AUDIO_RESET_GPIO (GPIO_PORTE + 10)	/* FIXME 0 = reset? */
++
++/* GPIOs on keypad connector (X603) */
++#define KP_ROW6_MISO (GPIO_PORTE + 7)	// Pin 15
++#define KP_COL6_MOSI (GPIO_PORTE + 6)	// Pin 16
++#define KP_ROW7_SLK (GPIO_PORTE + 4)	// Pin 17
++#define KP_COL7_SS0 (GPIO_PORTE + 3)	// Pin 18
++
++/******************************************************************************/
++/* PIN MULTIPLEXING                                                           */
++/******************************************************************************/
++static int guf_neso_pins[] = {
++	/* UART1 */
++	PE12_PF_UART1_TXD,
++	PE13_PF_UART1_RXD,
++	PE14_PF_UART1_CTS,
++	PE15_PF_UART1_RTS,
++	/* UART3 */
++	PE8_PF_UART3_TXD,
++	PE9_PF_UART3_RXD,
++	PC18_GPIO_UART3_TX_EN,
++	/* UART 5 */
++	PB18_AF_UART5_TXD,
++	PB19_AF_UART5_RXD,
++	/* FEC */
++	PD0_AIN_FEC_TXD0,
++	PD1_AIN_FEC_TXD1,
++	PD2_AIN_FEC_TXD2,
++	PD3_AIN_FEC_TXD3,
++	PD4_AOUT_FEC_RX_ER,
++	PD5_AOUT_FEC_RXD1,
++	PD6_AOUT_FEC_RXD2,
++	PD7_AOUT_FEC_RXD3,
++	PD8_AF_FEC_MDIO,
++	PD9_AIN_FEC_MDC,
++	PD10_AOUT_FEC_CRS,
++	PD11_AOUT_FEC_TX_CLK,
++	PD12_AOUT_FEC_RXD0,
++	PD13_AOUT_FEC_RX_DV,
++	PD14_AOUT_FEC_RX_CLK,
++	PD15_AOUT_FEC_COL,
++	PD16_AIN_FEC_TX_ER,
++	PF23_AIN_FEC_TX_EN,
++
++	/* SSI1 connected in AC97 style */
++	PC20_PF_SSI1_FS,
++	PC21_PF_SSI1_RXD,
++	PC22_PF_SSI1_TXD,
++	PC23_PF_SSI1_CLK,
++	(AUDIO_IRQ_GPIO | GPIO_GPIO | GPIO_IN),
++	(AUDIO_SPEAKER_GPIO | GPIO_GPIO | GPIO_OUT),
++	(AUDIO_RESET_GPIO | GPIO_GPIO | GPIO_IN),
++
++	/* LED 1 */
++	(GPIO_PORTB | 15 | GPIO_GPIO | GPIO_OUT),
++	/* LED 2 */
++	(GPIO_PORTB | 16 | GPIO_GPIO | GPIO_OUT),
++	/* CTOUCH reset */
++	(GPIO_PORTB | 17 | GPIO_GPIO | GPIO_OUT),
++	/* CTOUCH IRQ */
++	(GPIO_PORTB | 14 | GPIO_GPIO | GPIO_IN),
++	/* RTC IRQ */
++	(GPIO_PORTF | 14 | GPIO_GPIO | GPIO_IN),
++	/* SD change card detection */
++	(GPIO_PORTF | 17 | GPIO_GPIO | GPIO_IN),
++	/* SDHC1*/
++	PE18_PF_SD1_D0,
++	PE19_PF_SD1_D1,
++	PE20_PF_SD1_D2,
++	PE21_PF_SD1_D3,
++	PE22_PF_SD1_CMD,
++	PE23_PF_SD1_CLK,
++	/* I2C1 */
++	PD17_PF_I2C_DATA,
++	PD18_PF_I2C_CLK,
++	/* I2C2, for CTOUCH */
++	PC5_PF_I2C2_SDA,
++	PC6_PF_I2C2_SCL,
++
++	/* Connected to: Both USB phys and ethernet phy FIXME 1 = RESET? */
++	PE17_PF_RESET_OUT,
++
++	/* USB host */
++	(USBH2_PHY_CS_GPIO | GPIO_GPIO | GPIO_OUT),
++	PA0_PF_USBH2_CLK,
++	PA1_PF_USBH2_DIR,
++	PA3_PF_USBH2_NXT,
++	PA4_PF_USBH2_STP,
++	PD22_AF_USBH2_DATA0,
++	PD24_AF_USBH2_DATA1,
++	PD23_AF_USBH2_DATA2,
++	PD20_AF_USBH2_DATA3,
++	PD19_AF_USBH2_DATA4,
++	PD26_AF_USBH2_DATA5,
++	PD21_AF_USBH2_DATA6,
++	PA2_PF_USBH2_DATA7,
++
++	/* USB OTG */
++	(OTG_PHY_CS_GPIO | GPIO_GPIO | GPIO_OUT),
++	PE24_PF_USBOTG_CLK,
++	PE2_PF_USBOTG_DIR,
++	PE0_PF_USBOTG_NXT,
++	PE1_PF_USBOTG_STP,
++	PC9_PF_USBOTG_DATA0,
++	PC11_PF_USBOTG_DATA1,
++	PC10_PF_USBOTG_DATA2,
++	PC13_PF_USBOTG_DATA3,
++	PC12_PF_USBOTG_DATA4,
++	PC7_PF_USBOTG_DATA5,
++	PC8_PF_USBOTG_DATA6,
++	PE25_PF_USBOTG_DATA7,
++
++	/* Display signals */
++	(LCD_POWER_GPIO | GPIO_GPIO | GPIO_OUT), /* LCD power: 1 = LCD on */
++	PA5_PF_LSCLK,
++	PA6_PF_LD0,
++	PA7_PF_LD1,
++	PA8_PF_LD2,
++	PA9_PF_LD3,
++	PA10_PF_LD4,
++	PA11_PF_LD5,
++	PA12_PF_LD6,
++	PA13_PF_LD7,
++	PA14_PF_LD8,
++	PA15_PF_LD9,
++	PA16_PF_LD10,
++	PA17_PF_LD11,
++	PA18_PF_LD12,
++	PA19_PF_LD13,
++	PA20_PF_LD14,
++	PA21_PF_LD15,
++	PA22_PF_LD16,
++	PA23_PF_LD17,
++	PA31_PF_OE_ACD,	/* DE */
++	(BACKLIGHT_POWER_GPIO | GPIO_PF | GPIO_OUT),	/* Backlight PWM */
++
++	/* GPIOs Keypad */
++	(GPIO_PORTE | GPIO_GPIO | GPIO_IN | 3),
++	(GPIO_PORTE | GPIO_GPIO | GPIO_IN | 4),
++	(GPIO_PORTE | GPIO_GPIO | GPIO_IN | 6),
++	(GPIO_PORTE | GPIO_GPIO | GPIO_IN | 7),
++};
++
++
++/******************************************************************************/
++/* LED                                                                        */
++/******************************************************************************/
++static struct gpio_led gpio_leds[] = {
++	{
++		.name			= "led1",
++		.default_trigger	= "none",
++		.active_low		= 0,
++		.gpio			= GPIO_PORTB | 16,
++	},
++	{
++		.name			= "led2",
++		.default_trigger	= "none",
++		.active_low		= 0,
++		.gpio			= GPIO_PORTB | 15,
++	},
++};
++
++static struct gpio_led_platform_data gpio_led_info = {
++	.leds		= gpio_leds,
++	.num_leds	= ARRAY_SIZE(gpio_leds),
++};
++
++static struct platform_device leds_gpio = {
++	.name	= "leds-gpio",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &gpio_led_info,
++	},
++};
++
++/******************************************************************************/
++/* SERIAL                                                                     */
++/******************************************************************************/
++void guf_neso_rs485_tx_enable (int enable)
++{
++	gpio_set_value(GPIO_PORTC + 18, enable);
++}
++
++static struct imxuart_platform_data uart_pdata[] = {
++	{
++		.flags = IMXUART_HAVE_RTSCTS,
++	}, {
++		.flags = IMXUART_HAVE_RTSCTS,
++	}, {
++		.flags = IMXUART_HAVE_RTSCTS | IMXUART_RS485 | IMXUART_RS485_HALFD,
++		.rs485_tx_enable = guf_neso_rs485_tx_enable,
++	}, {
++		.flags = IMXUART_HAVE_RTSCTS,
++	}, {
++		.flags = 0,
++	},
++};
++/******************************************************************************/
++/* LCD POWER                                                                  */
++/******************************************************************************/
++static void neso_lcd_power_control(struct plat_lcd_data *pd, unsigned int power)
++{
++	if (power != 0)
++		gpio_set_value(LCD_POWER_GPIO, 1);	/* on */
++	else
++		gpio_set_value(LCD_POWER_GPIO, 0);	/* off */
++}
++
++static struct plat_lcd_data neso_lcd_power_info = {
++	.set_power = neso_lcd_power_control,
++	.match_fb = NULL,	/* FIXME */
++};
++
++static struct platform_device neso_lcd_power = {
++	.name	= "platform-lcd",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &neso_lcd_power_info,
++	},
++};
++
++/******************************************************************************/
++/* BACKLIGHT                                                                  */
++/******************************************************************************/
++static struct platform_pwm_backlight_data neso_backlight_info = {
++	.pwm_id = 0,
++	.max_brightness = 255,
++	.dft_brightness = 255,
++	.pwm_period_ns = 0x3D0900,
++	.lut = 0,
++};
++
++static struct platform_device neso_backlight_power = {
++	.name	= "pwm-backlight",
++	.id	= -1,
++	.dev	= {
++		.parent = &mxc_pwm_device.dev,
++		.platform_data	= &neso_backlight_info,
++	},
++};
++
++static void neso_setup_backlight_from_guf_xml(void)
++{
++	/* default brightness */
++	neso_backlight_info.dft_brightness = config.backlight.level_ac;
++	/* configure backlight */
++	neso_backlight_info.lut = config.backlight.lut; // set look-up table
++	neso_backlight_info.dft_brightness = config.backlight.level_ac; // set level
++}
++
++/******************************************************************************/
++/* VIDEO                                                                      */
++/******************************************************************************/
++static struct imx_fb_videomode neso_mode;
++
++static struct imx_fb_platform_data neso_fb_data = {
++	.mode = &neso_mode,
++	.num_modes = 1,
++	/* dynamic mode -> using the reset values (as recommended in the datasheet) */
++	.dmacr		= (0 << 31) | (4 << 16) | 96,
++	.backlight_dev = &neso_backlight_power.dev,
++	.lcd_dev = &neso_lcd_power.dev,
++};
++
++static uint32_t fixed_screen_address;
++static uint32_t fixed_screen_size;
++
++static int __init neso_fixed_screen(char *options)
++{
++	int display_enabled;
++
++	if (sscanf(options, "%d,%x,%x", &display_enabled, &fixed_screen_address, &fixed_screen_size) != 3) {
++		pr_err("NESO platform: wrong vidmem parameter syntax. Ignoring.\n");
++		fixed_screen_address = 0U;	/* to be sure */
++		return 0;
++	}
++	/* nothing shown yet? e.g. no splash screen */
++	if (display_enabled == 0)
++		/* do not use any hard coded framebuffer address in this case */
++		fixed_screen_address = 0U;
++	else
++		pr_info("NESO platform: Using fixed framebuffer memory at %x\n",
++			fixed_screen_address);
++
++	return 0;
++}
++__setup("vidmem=", neso_fixed_screen);
++
++/* can't be __init :-( */
++static void imx_init_fb(void)
++{
++	/* configure framebuffer device */
++	neso_mode.mode.name = config.display.name;
++	neso_mode.mode.xres = config.display.xres;
++	neso_mode.mode.yres = config.display.yres;
++	neso_mode.bpp = config.format.depth;
++	if (config.display.pix_clk == 0) {
++		neso_mode.mode.pixclock = (config.display.xres + config.hsync.start_width \
++				+ config.hsync.width + config.hsync.end_width) \
++				* (config.display.yres + config.vsync.start_width + config.vsync.width \
++				+ config.vsync.end_width) * config.display.refresh / 1000;
++	} else {
++		neso_mode.mode.pixclock = config.display.pix_clk / 1000;
++	}
++	neso_mode.mode.hsync_len = config.hsync.width;
++	neso_mode.mode.left_margin = config.hsync.start_width;
++	neso_mode.mode.right_margin = config.hsync.end_width;
++	neso_mode.mode.vsync_len = config.vsync.width;
++	neso_mode.mode.upper_margin = config.vsync.start_width;
++	neso_mode.mode.lower_margin = config.vsync.end_width;
++
++	/* If the bootloader provides a framebuffer, we will continue to use it */
++	if (fixed_screen_address != 0U) {
++		request_mem_region(fixed_screen_address,
++					fixed_screen_size, "imx-fb");
++		neso_fb_data.fixed_screen_cpu = ioremap(fixed_screen_address, fixed_screen_size);
++		neso_fb_data.fixed_screen_dma = fixed_screen_address;
++	}
++
++	/* change the interpratation of "polarity" and "select_enable" dependent
++	   on "original_dc" */
++	if (config.display.original_dc != NULL)
++	{
++		if (!strcmp(config.display.original_dc, "IPU")) {
++			/* IPU compared to CLCDC uses inverted clock.select_enable and clock.polarity */
++			config.clock.select_enable = (config.clock.select_enable == 0);
++			config.clock.polarity = (config.clock.polarity == 0);
++		}
++	}
++
++	/* construct Value for PCR */
++	neso_mode.pcr = (config.clock.select_enable ? PCR_SCLK_SEL : 0) |
++		(config.clock.idle_enable ? PCR_SCLKIDLE : 0) |
++		(config.data.oe_polarity ? 0 : PCR_OEPOL ) |
++		(config.clock.polarity ? PCR_CLKPOL : 0) |
++		(config.hsync.polarity ? PCR_LPPOL : 0) |
++		(config.vsync.polarity ? PCR_FLMPOL : 0) |
++		(config.data.polarity ? PCR_PIXPOL : 0) |
++		PCR_COLOR | PCR_TFT; /* using TFT-Display */
++
++	/* Set up the display power sequence */
++	neso_fb_data.poweron_to_signalon = config.powerseq.poweron_to_signalon;
++	neso_fb_data.poweron_to_backlighton = config.powerseq.poweron_to_backlighton;
++	neso_fb_data.backlightoff_before_poweroff = config.powerseq.backlightoff_before_poweroff;
++	neso_fb_data.signaloff_before_poweroff = config.powerseq.signaloff_before_poweroff;
++	neso_fb_data.poweroff_to_poweron = config.powerseq.poweroff_to_poweron;
++
++	/* register this framebuffer */
++	mxc_register_device(&mxc_fb_device, &neso_fb_data);
++
++#ifdef CONFIG_FRAMEBUFFER_CONSOLE
++	/* Adjust frambuffer console rotation */
++	switch (config.rotation.angle)
++	{
++		default:
++		case ROTATION_0:
++			fbcon_change_rotation(2);
++		case ROTATION_90:
++			fbcon_change_rotation(3);
++		case ROTATION_180:
++			fbcon_change_rotation(0);
++		case ROTATION_270:
++			fbcon_change_rotation(1);
++	}
++#endif
++}
++
++/******************************************************************************/
++/* I2C / EEPROM / RTC                                                         */
++/******************************************************************************/
++static struct imxi2c_platform_data guf_neso_i2c_1_data = {
++	.bitrate = 100000,
++};
++
++static struct guf_eeprom_memory_accessor gl_eeprom_acc;
++static void guf_neso_eeprom_setup(struct memory_accessor *mem_acc, void *context)
++{
++	gl_eeprom_acc.mem_acc.read = mem_acc->read;
++	gl_eeprom_acc.mem_acc.write = mem_acc->write;
++	gl_eeprom_acc.cont = context;
++}
++
++static struct gfeeprom_platform_data guf_neso_eeprom_pdata = {
++	.byte_len = (1 << 12),
++	.page_size = 0x20,
++	.flags = AT24_FLAG_ADDR16,
++	.bus_id = 0,
++	.context = &(guf_neso_eeprom_pdata.bus_id),
++	.setup = guf_neso_eeprom_setup,
++};
++
++static struct i2c_board_info guf_neso_i2c_devices[] = {
++    {
++		I2C_BOARD_INFO("gfeeprom", GF_GLOBAL_PLATFORM_EEPROM_ADDRESS), /* E0=0, E1=0, E2=0 */
++		.platform_data = &guf_neso_eeprom_pdata,
++	},
++	{
++		I2C_BOARD_INFO("pcf8563", 0x51),
++	}
++};
++
++/******************************************************************************/
++/* TOUCHSCREEN                                                                */
++/******************************************************************************/
++static struct ucb1400_pdata guf_neso_ucb1400_pdata = {
++	.irq = IRQ_GPIOC(28),
++};
++
++static void guf_neso_init_touch_driver(guf_xml_data_touch_t touch)
++{
++	switch(touch) {
++	case TOUCH_UCB1400:
++		guf_neso_ucb1400_pdata.enable_ts = true;
++		break;
++	default:
++		printk("Warning: Selected touch not supported on this platform\n");
++	case TOUCH_NONE:
++		printk("Booting kernel without touch support\n");
++	}
++}
++
++/******************************************************************************/
++/* AUDIO                                                                      */
++/******************************************************************************/
++static void guf_neso_toggle_speaker(int enable)
++{
++	/* Toggle speaker */
++	gpio_direction_output(AUDIO_SPEAKER_GPIO, 1);
++	gpio_set_value(AUDIO_SPEAKER_GPIO, enable);
++}
++
++static void guf_neso_ac97_warm_reset(struct snd_ac97 *ac97)
++{
++	/* clamp SYNC to fixed value */
++	mxc_gpio_mode(GPIO_PORTC | 20 | GPIO_GPIO | GPIO_OUT); /* FS */
++	gpio_set_value(GPIO_PORTC + 20, 1);
++	udelay(2);
++	gpio_set_value(GPIO_PORTC + 20, 0);
++	/* back to AC97 feature */
++	mxc_gpio_mode(PC20_PF_SSI1_FS);
++	msleep(2);
++}
++
++static void guf_neso_ac97_cold_reset(struct snd_ac97 *ac97)
++{
++	/* clamp SYNC and SDATA_OUT to fixed values */
++	mxc_gpio_mode(GPIO_PORTC | 20 | GPIO_GPIO | GPIO_OUT);	/* FS */
++	gpio_set_value(GPIO_PORTC + 20, 0);
++	mxc_gpio_mode(GPIO_PORTC | 22 | GPIO_GPIO | GPIO_OUT);	/* TX */
++	gpio_set_value(GPIO_PORTC + 22, 0);
++
++	/* apply the hard reset signal */
++	mxc_gpio_mode(GPIO_PORTE | 10 | GPIO_GPIO | GPIO_OUT);
++	gpio_set_value(AUDIO_RESET_GPIO, 0);
++	udelay(10);
++	gpio_set_value(AUDIO_RESET_GPIO, 1);
++
++	/* back to AC97 feature */
++	mxc_gpio_mode(PC20_PF_SSI1_FS);
++	mxc_gpio_mode(PC22_PF_SSI1_TXD);
++	msleep(2);
++}
++
++static struct imx_ssi_platform_data ssi_pdata = {
++	.ac97_reset = guf_neso_ac97_cold_reset,
++	.ac97_warm_reset = guf_neso_ac97_warm_reset,
++	.toggle_speaker = guf_neso_toggle_speaker,
++	.flags = IMX_SSI_USE_AC97,
++};
++
++/******************************************************************************/
++/* SDHC                                                                        */
++/******************************************************************************/
++static int
++guf_neso_sdhc1_init(struct device *dev, irq_handler_t detect_irq, void *data)
++{
++	return request_irq(IRQ_GPIOF(17), detect_irq, IRQF_TRIGGER_RISING,
++			   "sdhc1-card-detect", data);
++}
++
++static void
++guf_neso_sdhc1_exit(struct device *dev, void *data)
++{
++	free_irq(IRQ_GPIOF(17), data);
++}
++
++static struct imxmmc_platform_data sdhc1_pdata = {
++	.init = guf_neso_sdhc1_init,
++	.exit = guf_neso_sdhc1_exit,
++};
++
++/******************************************************************************/
++/* USB                                                                        */
++/******************************************************************************/
++#if defined (CONFIG_USB_OTG_UTILS) && defined(CONFIG_USB_ULPI)
++static int otg_phy_init(struct platform_device *pdev)
++{
++	gpio_set_value(OTG_PHY_CS_GPIO, 0);
++	return 0;
++}
++
++static struct mxc_usbh_platform_data otg_pdata = {
++	.init	= otg_phy_init,
++	.portsc	= MXC_EHCI_MODE_ULPI,
++	.flags	= MXC_EHCI_INTERFACE_DIFF_UNI,
++};
++#endif
++
++static int usbh2_phy_init(struct platform_device *pdev)
++{
++	gpio_set_value(USBH2_PHY_CS_GPIO, 0);
++	return 0;
++}
++
++static struct mxc_usbh_platform_data usbh2_pdata = {
++	.init	= usbh2_phy_init,
++	.portsc	= MXC_EHCI_MODE_ULPI,
++	.flags	= MXC_EHCI_INTERFACE_DIFF_UNI,
++};
++
++/******************************************************************************/
++/* ETHERNET                                                                   */
++/******************************************************************************/
++static int guf_handle_netdev_event (struct notifier_block *block,
++					 unsigned long event,
++					 void *ptr)
++{
++	struct net_device *dev = ptr;
++	int i;
++
++	if (strcmp(dev->name, "eth0") != 0)
++		goto out;
++
++	if (event == NETDEV_REGISTER && is_valid_ether_addr(config.mac_addr.sa_data)) {
++		for (i = 0; i < 6; i++) {
++			dev->dev_addr[i] = config.mac_addr.sa_data[i];
++		}
++		config.mac_addr.sa_family = dev->type;
++		dev_set_mac_address(dev, &config.mac_addr);
++	}
++out:
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block guf_neso_netdev_event = {
++	.notifier_call = guf_handle_netdev_event,
++};
++
++/******************************************************************************/
++/* Platform Devices                                                           */
++/******************************************************************************/
++static struct platform_device *platform_devices[] = {
++	&mxc_fec_device,
++};
++
++static struct platform_device *display_devices[] = {
++	&leds_gpio,
++	&mxc_pwm_device,
++	&neso_lcd_power,
++	&neso_backlight_power,
++};
++
++/******************************************************************************/
++/* FLASH                                                                      */
++/******************************************************************************/
++static struct mxc_nand_platform_data guf_neso_nand_board_info = {
++	.width = 1,
++	.hw_ecc = 1,
++};
++
++static struct guf_xml_device_platform_data guf_xml_device_pdata = {
++	.mtd_fis_directory = NULL,
++	.mtd_redundant_fis = NULL,
++};
++
++static int guf_xml_device_registered = 0;
++
++/*
++ * some devices will be configured at runtime by XML data from NAND
++ * So, we must wait for the NAND to occure
++ */
++static void guf_neso_flash_add(struct mtd_info *mtd)
++{
++	char *buf = NULL;
++	size_t retlen;
++	int ret = 0;
++	struct ezxml *xml_cfg = NULL;
++
++	/* First, check RedBoot version */
++	if (strcmp(mtd->name, "RedBoot") == 0)
++	{
++		ret = guf_check_redboot_compatibility(MINIMUM_REDBOOT_VERSION);
++		if (ret == -EINVAL)
++			printk("WARNING: Could not determine required RedBoot version\n");
++		else if (ret != 0) {
++			printk("System halted.\n");
++			while(1);
++		}
++	}
++
++	/* Initialize guf_xml driver */
++	if (strncmp(NAME_FIS_DIRECTORY, mtd->name, LENGTH_NAME_FIS_DIRECTORY) == 0) {
++		printk("guf_xml: found partition %s\n", mtd->name);
++		guf_xml_device_pdata.mtd_fis_directory = mtd;
++	}
++
++	if (strncmp(NAME_REDUNDANT_FIS, mtd->name, LENGTH_NAME_REDUNDANT_FIS) == 0) {
++		printk("guf_xml: found partition %s\n", mtd->name);
++		guf_xml_device_pdata.mtd_redundant_fis = mtd;
++	}
++
++	if (guf_xml_device_pdata.mtd_fis_directory && guf_xml_device_pdata.mtd_redundant_fis && !guf_xml_device_registered) {
++		guf_xml_device.dev.platform_data = &guf_xml_device_pdata;
++		platform_device_register(&guf_xml_device);
++		guf_xml_device_registered = 1;
++	}
++
++	/* Read XML configuration */
++	if (strcmp(mtd->name, "Redundant FIS (ACTIVE)") == 0 ||
++	    strcmp(mtd->name, "FIS directory (ACTIVE)") == 0) {
++		buf = vmalloc(mtd->size);
++
++		mtd->read(mtd, 0, mtd->size, &retlen, (void*) buf);
++		if (ret || (retlen != mtd->size)) {
++			printk("Error reading config partition\n");
++			goto error;
++		}
++		xml_cfg = guf_get_config(buf);
++		if (xml_cfg == 0)
++			goto error;
++
++		if (get_machine_configuration(xml_cfg, &config) == 0)
++		{
++			/* Now register a netdev_notifier to set the mac address */
++			if (is_valid_ether_addr(config.mac_addr.sa_data))
++				register_netdevice_notifier(&guf_neso_netdev_event);
++			/* register the remaining devices */
++			platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
++		}
++		else
++			goto error;
++
++		if (get_display_configuration(xml_cfg, &config) == 0)
++		{
++			/* init framebuffer */
++			imx_init_fb();
++			/* init pwm backlight from XML data */
++			neso_setup_backlight_from_guf_xml();
++			/* register all display-related devices (now backlight level is set)*/
++			platform_add_devices(display_devices, ARRAY_SIZE(display_devices));
++		}
++		else
++			printk("Booting kernel without display support\n");
++
++		get_touch_configuration(xml_cfg, &config);
++		guf_neso_init_touch_driver(config.touch);
++
++		guf_free_config(xml_cfg);
++		vfree(buf);
++	}
++	return;
++
++error:
++	printk("Machine configuration data is missing in flash memory. System halted.\n");
++	while(1);
++}
++
++static void guf_neso_flash_remove(struct mtd_info *mtd)
++{
++	/* nothing to do here */
++}
++
++static struct mtd_notifier guf_neso_flash_notifier = {
++	.add = guf_neso_flash_add,
++	.remove = guf_neso_flash_remove,
++};
++
++/******************************************************************************/
++/* Digital I/O                                                                */
++/******************************************************************************/
++static uint32_t keypad_enabled;
++
++static int __init guf_neso_keypad_enabled(char *options)
++{
++	if (sscanf(options, "%d", &keypad_enabled) != 1) {
++		pr_err("NESO platform: wrong kepad_enabled parameter syntax. Ignoring.\n");
++		keypad_enabled = 0U;	/* to be sure */
++	}
++	return 0;
++}
++
++__setup("keypad_enabled=", guf_neso_keypad_enabled);
++
++/* These are the pin names that will appear under /sys/class/gpio/ */
++const char* mxc_gpio_names[196] = {
++	[KP_ROW6_MISO]	= "keypad_pin15",
++	[KP_COL6_MOSI]	= "keypad_pin16",
++	[KP_ROW7_SLK]	= "keypad_pin17",
++	[KP_COL7_SS0]	= "keypad_pin18",
++};
++
++static void guf_neso_configure_dio(void)
++{
++	/* Request, configure and register GPIOs */
++	/* If the keypad is not explicitly enabled use the keypad
++	   connector as digital I/O */
++	if(!keypad_enabled) {
++		/* Keypad connector (X603) */
++		gpio_request(KP_ROW6_MISO, "GPIO");
++		gpio_request(KP_COL6_MOSI, "GPIO");
++		gpio_request(KP_ROW7_SLK, "GPIO");
++		gpio_request(KP_COL7_SS0, "GPIO");
++
++		gpio_direction_input(KP_ROW6_MISO);
++		gpio_direction_input(KP_COL6_MOSI);
++		gpio_direction_input(KP_ROW7_SLK);
++		gpio_direction_input(KP_COL7_SS0);
++
++		gpio_sysfs_set_active_low(KP_ROW6_MISO, 0);
++		gpio_sysfs_set_active_low(KP_COL6_MOSI, 0);
++		gpio_sysfs_set_active_low(KP_ROW7_SLK, 0);
++		gpio_sysfs_set_active_low(KP_COL7_SS0, 0);
++
++		/* For these pins the direction is user configurable */
++		gpio_export(KP_ROW6_MISO, 1);
++		gpio_export(KP_COL6_MOSI, 1);
++		gpio_export(KP_ROW7_SLK, 1);
++		gpio_export(KP_COL7_SS0, 1);
++	}
++}
++
++/******************************************************************************/
++/* Board Initialization                                                       */
++/******************************************************************************/
++static void __init guf_neso_init(void)
++{
++	mxc_gpio_setup_multiple_pins(guf_neso_pins, ARRAY_SIZE(guf_neso_pins),
++			"NESO");
++
++	/* Pass UCB1400 private data to AC97 driver */
++	imx_ssi_pcm_dai[0].ac97_pdata = &guf_neso_ucb1400_pdata;
++
++	/* connect the internal SSI0 unit to the external SSI1 pin group */
++	mxc_audmux_v1_configure_port(MX27_AUDMUX_HPCR1_SSI0,
++				  MXC_AUDMUX_V1_PCR_SYN | /* 4wire mode */
++				  MXC_AUDMUX_V1_PCR_TFCSEL(3) |
++				  MXC_AUDMUX_V1_PCR_TCLKDIR | /* clock is output */
++				  MXC_AUDMUX_V1_PCR_RXDSEL(3));
++	mxc_audmux_v1_configure_port(3,
++				  MXC_AUDMUX_V1_PCR_SYN | /* 4wire mode */
++				  MXC_AUDMUX_V1_PCR_TFCSEL(0) |
++				  MXC_AUDMUX_V1_PCR_TFSDIR |
++				  MXC_AUDMUX_V1_PCR_RXDSEL(0));
++
++	/* reset the chip select lines to the USB/OTG phys to avoid any hang */
++	gpio_direction_output(OTG_PHY_CS_GPIO, 1);
++	gpio_direction_output(USBH2_PHY_CS_GPIO, 1);
++
++	mxc_register_device(&mxc_uart_device0, &uart_pdata[0]);
++	/* FIXME: RS485 */
++	mxc_register_device(&mxc_uart_device2, &uart_pdata[2]);
++	mxc_register_device(&mxc_uart_device4, &uart_pdata[4]);
++
++	mxc_register_device(&mxc_nand_device, &guf_neso_nand_board_info);
++	register_mtd_user(&guf_neso_flash_notifier);
++	mxc_register_device(&mxc_sdhc_device0, &sdhc1_pdata);
++	mxc_register_device(&imx_ssi_device0, &ssi_pdata);
++
++#if defined (CONFIG_USB_OTG_UTILS) && defined(CONFIG_USB_ULPI)
++	otg_pdata.otg = otg_ulpi_create(&mxc_ulpi_access_ops,
++			USB_OTG_DRV_VBUS | USB_OTG_DRV_VBUS_EXT);
++	mxc_register_device(&mxc_otg_host, &otg_pdata);
++
++	usbh2_pdata.otg = otg_ulpi_create(&mxc_ulpi_access_ops,
++				USB_OTG_DRV_VBUS | USB_OTG_DRV_VBUS_EXT);
++#endif
++	mxc_register_device(&mxc_usbh2, &usbh2_pdata);
++
++	/* I2C bus 1: onboard devices */
++	mxc_register_device(&mxc_i2c_device0, &guf_neso_i2c_1_data);
++	i2c_register_board_info(0, guf_neso_i2c_devices,
++				ARRAY_SIZE(guf_neso_i2c_devices));
++
++	/* I2C bus 2: CTOUCH */
++	/* FIXME - what does this do? Touch connected via UCB1400! */
++
++	guf_neso_configure_dio();
++}
++
++static void __init guf_neso_timer_init(void)
++{
++	mx27_clocks_init(26000000);
++}
++
++static struct sys_timer guf_neso_timer = {
++	.init = guf_neso_timer_init,
++};
++
++MACHINE_START(NESO, "Garz+Fricke NESO")
++	.phys_io        = MX27_AIPI_BASE_ADDR,
++	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
++#if defined CONFIG_MOVE_ATAG_LIST_FOR_GUF_REDBOOT
++	.boot_params    = PHYS_OFFSET + 0x10000,
++#else
++	.boot_params    = PHYS_OFFSET + 0x100,
++#endif
++	.map_io         = mx27_map_io,
++	.init_irq       = mx27_init_irq,
++	.init_machine   = guf_neso_init,
++	.timer          = &guf_neso_timer,
++MACHINE_END
+Index: linux-2.6.33/sound/soc/imx/Kconfig
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/Kconfig
++++ linux-2.6.33/sound/soc/imx/Kconfig
+@@ -11,3 +11,14 @@ config SND_IMX_SOC
+ config SND_MXC_SOC_SSI
+ 	tristate
+ 
++config SND_SOC_NESO_AC97
++	bool "G+F NESO sound/touch"
++	depends on MACH_NESO
++	select SND_IMX_SOC
++	select AC97_BUS
++	select SND_AC97_CODEC
++	select SND_SOC_AC97_CODEC
++	select SND_SOC_AC97_BUS
++	help
++	  Enable AC97 based access to the UCB1400 Sound/GPIO/Touch controller
++	  attached to the SSI0 interface
+Index: linux-2.6.33/sound/soc/imx/Makefile
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/Makefile
++++ linux-2.6.33/sound/soc/imx/Makefile
+@@ -8,3 +8,5 @@ endif
+ obj-$(CONFIG_SND_IMX_SOC) += snd-soc-imx.o
+ 
+ # i.MX Machine Support
++
++obj-$(CONFIG_SND_SOC_NESO_AC97) += neso-ac97.o
+Index: linux-2.6.33/sound/soc/imx/neso-ac97.c
+===================================================================
+--- /dev/null
++++ linux-2.6.33/sound/soc/imx/neso-ac97.c
+@@ -0,0 +1,90 @@
++/*
++ * neso-ac97.c  --  SoC audio for G+F NESO in AC97 mode
++ *
++ * Copyright 2009 Sascha Hauer, Pengutronix <s.hauer@pengutronix.de>
++ * Copyright 2010 Juergen Beisert, Pengutronix <kernel@pengutronix.de>
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/device.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <asm/mach-types.h>
++
++#include "../codecs/ac97.h"
++#include "imx-ssi.h"
++
++static struct snd_soc_card imx_neso;
++
++static struct snd_soc_ops imx_neso_hifi_ops = {
++};
++
++static struct snd_soc_dai_link imx_neso_dai_ac97[] = {
++	{
++		.name		= "HiFi",
++		.stream_name	= "AC97 HiFi",
++		.codec_dai	= &ac97_dai,
++		.ops		= &imx_neso_hifi_ops,
++	},
++};
++
++static struct snd_soc_card imx_neso = {
++	.name		= "neso-audio",
++	.platform	= &imx_soc_platform,
++	.dai_link	= imx_neso_dai_ac97,
++	.num_links	= ARRAY_SIZE(imx_neso_dai_ac97),
++};
++
++static struct snd_soc_device imx_neso_snd_devdata = {
++	.card		= &imx_neso,
++	.codec_dev	= &soc_codec_dev_ac97,
++};
++
++static struct platform_device *imx_neso_snd_device;
++
++static int __init imx_neso_init(void)
++{
++	int ret;
++
++	if (!machine_is_neso())
++		/* return happy. We might run on a totally different machine */
++		return 0;
++
++	imx_neso_snd_device = platform_device_alloc("soc-audio", -1);
++	if (!imx_neso_snd_device)
++		return -ENOMEM;
++
++	imx_neso_dai_ac97[0].cpu_dai = &imx_ssi_pcm_dai[0];
++
++	platform_set_drvdata(imx_neso_snd_device, &imx_neso_snd_devdata);
++	imx_neso_snd_devdata.dev = &imx_neso_snd_device->dev;
++	ret = platform_device_add(imx_neso_snd_device);
++
++	if (ret) {
++		printk(KERN_ERR "ASoC: Platform device allocation failed\n");
++		platform_device_put(imx_neso_snd_device);
++	}
++
++	return ret;
++}
++
++static void __exit imx_neso_exit(void)
++{
++	platform_device_unregister(imx_neso_snd_device);
++}
++
++late_initcall(imx_neso_init);
++module_exit(imx_neso_exit);
++
++MODULE_AUTHOR("Juergen Beisert <kernel@pengutronix.de>");
++MODULE_DESCRIPTION("G+F NESO ALSA SoC driver");
++MODULE_LICENSE("GPL");

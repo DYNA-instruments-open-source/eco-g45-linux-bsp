@@ -1,0 +1,634 @@
+--- a/drivers/pwm/Makefile
++++ b/drivers/pwm/Makefile
+@@ -5,6 +5,7 @@ obj-$(CONFIG_PWM_ATMEL)		+= pwm-atmel.o
+ obj-$(CONFIG_PWM_ATMEL_TCB)	+= pwm-atmel-tcb.o
+ obj-$(CONFIG_PWM_BFIN)		+= pwm-bfin.o
+ obj-$(CONFIG_PWM_EP93XX)	+= pwm-ep93xx.o
++obj-$(CONFIG_PWM_GPIO)		+= pwm-gpio.o
+ obj-$(CONFIG_PWM_IMX)		+= pwm-imx.o
+ obj-$(CONFIG_PWM_JZ4740)	+= pwm-jz4740.o
+ obj-$(CONFIG_PWM_LP3943)	+= pwm-lp3943.o
+--- /dev/null
++++ b/drivers/pwm/pwm-gpio.c
+@@ -0,0 +1,576 @@
++/*
++ * Emulates a PWM device using an hrtimer and GPIO pin
++ *
++ * Copyright (C) 2011 Bill Gatliff <bgat@billgatliff.com>
++ * Ported to kernel version 3.14 2014 by Johannes Lode <linuxer@quantentunnel.de>
++ *
++ * This program is free software; you may redistribute and/or modify
++ * it under the terms of the GNU General Public License Version 2, as
++ * published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
++ * USA
++ */
++
++#include <linux/module.h>
++#include <linux/version.h>
++#include <linux/kernel.h>
++
++#include <linux/platform_device.h>
++
++#include <linux/init.h>
++#include <linux/hrtimer.h>
++#include <linux/err.h>
++#include <linux/workqueue.h>
++#include <linux/gpio.h>
++#include <linux/slab.h>
++#include <linux/completion.h>
++#include <linux/configfs.h>
++#include <linux/pwm.h>
++
++#define DRIVER_NAME KBUILD_MODNAME
++
++#define DRIVER_VERSION "0.2"
++
++struct gpio_pwm_chip {
++  struct pwm_chip chip;
++	struct pwm_device *pwm;
++	struct hrtimer timer;
++	ktime_t period;
++  ktime_t duty_on;
++  ktime_t duty_off;
++	struct work_struct work;
++	spinlock_t lock;
++	struct completion complete;
++	int gpio;
++	unsigned long polarity : 1;
++	unsigned long active : 1;
++	unsigned long running : 1;
++	unsigned long stop : 1;
++};
++
++static void gpio_pwm_work(struct work_struct *work)
++{
++	struct gpio_pwm_chip *gp;
++
++	gp = container_of(work, struct gpio_pwm_chip, work);
++
++	gpio_direction_output(gp->gpio, !(!!gp->polarity ^ !!gp->active));
++}
++
++static enum hrtimer_restart gpio_pwm_timeout(struct hrtimer *t)
++{
++	struct gpio_pwm_chip *gp;
++	struct pwm_device *p;
++
++	gp = container_of(t, struct gpio_pwm_chip, timer);
++	p = gp->pwm;
++
++	if (unlikely(gp->stop || (p->duty_cycle == 0)))
++		gp->active = 0;
++	else if (unlikely(p->duty_cycle >= p->period))
++		gp->active = 1;
++	else
++		gp->active ^= 1;
++
++	if (gpio_cansleep(gp->gpio))
++		schedule_work(&gp->work);
++	else
++		gpio_pwm_work(&gp->work);
++
++	if (unlikely(!gp->active && gp->stop)) {
++	  gp->stop = 0;
++		complete_all(&gp->complete);
++		goto done;
++	}
++
++	if (unlikely(p->duty_cycle >= p->period))
++	{
++	  hrtimer_forward_now(&gp->timer, gp->period);
++	}
++	else
++	{
++	  if (gp->active)
++	  {
++	    hrtimer_forward_now(&gp->timer, gp->duty_on);
++	  }
++	  else
++	  {
++	    hrtimer_forward_now(&gp->timer, gp->duty_off);
++	  }
++	}
++
++done:
++	return HRTIMER_RESTART;
++}
++
++static void gpio_pwm_start(struct gpio_pwm_chip *gp, struct pwm_device *p)
++{
++  u64 start_delay = 0;
++	gp->active = 0;
++
++	if (unlikely(p->duty_cycle >= p->period))
++	  start_delay = 1;
++	else
++	  start_delay = p->period - p->duty_cycle;
++
++	// start with the passive phase
++	hrtimer_start(&gp->timer, ktime_add_ns(ktime_set(0, 0), start_delay), HRTIMER_MODE_REL);
++
++  gp->running = 1;
++}
++
++static int gpio_pwm_stop_sync(struct gpio_pwm_chip *gp)
++{
++	int ret;
++	int was_on = hrtimer_active(&gp->timer);
++
++  might_sleep();
++
++	if (was_on) {
++		do {
++			init_completion(&gp->complete);
++			gp->stop = 1;
++			ret = wait_for_completion_interruptible(&gp->complete);
++			if (ret)
++				return ret;
++		} while (gp->stop);
++	}
++
++  hrtimer_cancel(&gp->timer);
++  cancel_work_sync(&gp->work);
++
++	gp->running = 0;
++
++	return was_on;
++}
++
++static int gpio_pwm_config(struct pwm_chip *chip,
++                           struct pwm_device *p,
++                           int duty_ns, int period_ns)
++{
++  struct gpio_pwm_chip *gp;
++
++  gp = container_of(chip, struct gpio_pwm_chip, chip);
++
++	p->period = period_ns;
++	gp->period = ns_to_ktime(p->period);
++	p->duty_cycle = duty_ns;
++  gp->duty_on = ns_to_ktime(p->duty_cycle);
++  if (unlikely(p->duty_cycle >= p->period))
++    gp->duty_off = ktime_set(0, 0);
++  else
++    gp->duty_off = ns_to_ktime(p->period - p->duty_cycle);
++
++	return 0;
++}
++
++int gpio_pwm_set_polarity(struct pwm_chip *chip,
++                          struct pwm_device *p,
++                          enum pwm_polarity polarity)
++{
++//  int was_on = 0;
++  struct gpio_pwm_chip *gp;
++
++  gp = container_of(chip, struct gpio_pwm_chip, chip);
++
++
++  gp->polarity = PWM_POLARITY_NORMAL == polarity ? 1 : 0;
++
++  if (!gp->running)
++    gpio_pwm_work(&gp->work);
++
++  return 0;
++}
++
++int gpio_pwm_enable(struct pwm_chip *chip, struct pwm_device *p)
++{
++  struct gpio_pwm_chip *gp;
++
++  gp = container_of(chip, struct gpio_pwm_chip, chip);
++
++  gp->stop = 0;
++
++  gpio_pwm_start(gp, p);
++
++  return 0;
++}
++
++void gpio_pwm_disable(struct pwm_chip *chip, struct pwm_device *p)
++{
++  struct gpio_pwm_chip *gp;
++
++  gp = container_of(chip, struct gpio_pwm_chip, chip);
++
++  gp->stop = 1;
++
++  gpio_pwm_stop_sync(gp);
++}
++
++static int gpio_pwm_request(struct pwm_chip *chip, struct pwm_device *p)
++{
++  struct gpio_pwm_chip *gp;
++
++  gp = container_of(chip, struct gpio_pwm_chip, chip);
++
++  gp->pwm = p;
++
++	return 0;
++}
++
++void gpio_pwm_free(struct pwm_chip *chip, struct pwm_device *pwm)
++{
++  // intentionally left empty
++}
++
++static const struct pwm_ops gpio_pwm_device_ops = {
++	.request	= gpio_pwm_request,
++	.free     = gpio_pwm_free,
++	.config		= gpio_pwm_config,
++	.enable   = gpio_pwm_enable,
++	.disable  = gpio_pwm_disable,
++	.set_polarity = gpio_pwm_set_polarity,
++	.owner		= THIS_MODULE,
++};
++
++struct gpio_pwm_pin
++{
++  int pin;
++};
++
++static int gpio_pwm_probe(struct platform_device *pdev)
++{
++  struct gpio_pwm_pin *gpio;
++  struct gpio_pwm_chip *gp;
++  int err;
++  // read GPIO pin from pdev->dev.platform_data
++  gpio = pdev->dev.platform_data;
++  // allocate GPIO pin
++  if (!gpio_is_valid(gpio->pin))
++    return (-EINVAL);
++
++  if (gpio_request_one(gpio->pin, GPIOF_DIR_OUT | GPIOF_EXPORT_DIR_FIXED, DRIVER_NAME))
++    return (-EBUSY);
++
++  // construct a pwm_chip
++  gp = devm_kzalloc(&pdev->dev, sizeof(*gp), GFP_KERNEL);
++  if (gp == NULL)
++  {
++    gpio_free(gpio->pin);
++    dev_err(&pdev->dev, "failed to allocate memory\n");
++    return -ENOMEM;
++  }
++
++  // initialize pwm_chip
++  gp->stop = 0;
++  gp->running = 0;
++  gp->polarity = 1;
++  gp->active = 0;
++  gp->gpio = gpio->pin;
++  INIT_WORK(&gp->work, gpio_pwm_work);
++  init_completion(&gp->complete);
++  hrtimer_init(&gp->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++  gp->timer.function = gpio_pwm_timeout;
++  gp->pwm = 0;
++
++  gp->chip.dev = &pdev->dev;
++  gp->chip.ops = &gpio_pwm_device_ops;
++  gp->chip.of_xlate = of_pwm_xlate_with_flags;
++  gp->chip.of_pwm_n_cells = 1;
++  gp->chip.base = -1;
++  gp->chip.npwm = 1;
++  gp->chip.can_sleep = true;
++
++  spin_lock_init(&gp->lock);
++
++  // add pwm_chip to the system
++  err = pwmchip_add(&gp->chip);
++  if (err < 0) {
++    gpio_free(gp->gpio);
++//    devm_kfree(&pdev->dev, gp);
++    return err;
++  }
++
++  // set driver data in platform_device
++  platform_set_drvdata(pdev, gp);
++
++  gpiod_export_link(&pdev->dev, "gpio", gpio_to_desc(gp->gpio));
++
++  return 0;
++}
++
++static int gpio_pwm_remove(struct platform_device *pdev)
++{
++  // do the inverse of gpio_pwm_probe()
++  int err;
++  struct gpio_pwm_chip *gp = platform_get_drvdata(pdev);
++
++  gpio_pwm_stop_sync(gp);
++
++  err = pwmchip_remove(&gp->chip);
++  if (err < 0)
++  {
++    dev_err(&pdev->dev, "pwmchip_remove() returned error %d\n", err);
++    return err;
++  }
++
++  gpio_free(gp->gpio);
++
++  return 0;
++}
++
++static struct platform_driver gpio_pwm_driver = {
++  .driver = {
++    .name = DRIVER_NAME,
++    .owner = THIS_MODULE,
++  },
++  .probe = gpio_pwm_probe,
++  .remove = gpio_pwm_remove,
++};
++
++struct platform_device *gpio_pwm_create(int gpio_pin)
++{
++  struct platform_device* pdev;
++  struct gpio_pwm_pin gpio;
++  int ret = 0;
++
++  gpio.pin = gpio_pin;
++  if (!gpio_is_valid(gpio.pin))
++    return ERR_PTR(-EINVAL);
++
++  pdev = platform_device_alloc(DRIVER_NAME, PLATFORM_DEVID_AUTO);
++
++  if (!pdev)
++    return ERR_PTR(-ENOMEM);
++
++  platform_device_add_data(pdev, &gpio, sizeof(gpio));
++
++  ret = platform_device_add(pdev);
++
++  if (ret)
++  {
++    platform_device_del(pdev);
++    pdev = ERR_PTR(ret);
++  }
++
++  return pdev;
++}
++EXPORT_SYMBOL(gpio_pwm_create);
++
++int gpio_pwm_destroy(struct platform_device *p)
++{
++  platform_device_unregister(p);
++
++  return 0;
++}
++EXPORT_SYMBOL(gpio_pwm_destroy);
++
++#if IS_ENABLED(CONFIG_CONFIGFS_FS)
++
++struct gpio_pwm_target {
++  struct config_item item;
++  struct platform_device *pdev;
++};
++
++#if IS_ENABLED(CONFIG_PWM_GPIO_VERBOSE)
++static ssize_t gpio_pwm_show_chipname(struct config_item *item,
++                                    struct configfs_attribute *attr,
++                                    char *buffer)
++{
++  struct gpio_pwm_target *t;
++  struct gpio_pwm_chip *gp;
++
++  t = container_of(item, struct gpio_pwm_target, item);
++  gp = platform_get_drvdata(t->pdev);
++
++  return sprintf(buffer, "pwmchip%d\n", gp->chip.base);
++}
++
++static struct configfs_item_operations gpio_pwm_chip_item_ops = {
++  .show_attribute = &gpio_pwm_show_chipname,
++};
++
++static struct configfs_attribute gpio_pwm_chipname_attr = {
++    .ca_name = "class_device",
++    .ca_owner = THIS_MODULE,
++    .ca_mode = S_IRUGO,
++};
++
++static struct configfs_attribute *gpio_pwm_chip_attr[] = {
++  &gpio_pwm_chipname_attr,
++  0,
++};
++#else
++static struct configfs_item_operations gpio_pwm_chip_item_ops = {
++};
++
++static struct configfs_attribute *gpio_pwm_chip_attr[] = {
++  0,
++};
++#endif
++
++static struct config_item_type gpio_pwm_item_type = {
++  .ct_owner = THIS_MODULE,
++  .ct_item_ops = &gpio_pwm_chip_item_ops,
++  .ct_attrs = gpio_pwm_chip_attr,
++};
++
++static struct config_item *make_gpio_pwm_target(struct config_group *group,
++            const char *name)
++{
++  struct gpio_pwm_target *t;
++  unsigned long gpio;
++  int ret;
++
++  ret = strict_strtoul(name, 10, &gpio);
++  if (ret || !gpio_is_valid(gpio)) {
++    ret = -EINVAL;
++    goto err_invalid_gpio;
++  }
++
++  t = kzalloc(sizeof(*t), GFP_KERNEL);
++  if (!t)
++    return ERR_PTR(-ENOMEM);
++
++  t->pdev = gpio_pwm_create(gpio);
++  if (IS_ERR_OR_NULL(t->pdev))
++    goto err_gpio_pwm_create;
++
++  config_item_init_type_name(&t->item, name, &gpio_pwm_item_type);
++
++  return &t->item;
++
++err_gpio_pwm_create:
++  kfree(t);
++err_invalid_gpio:
++  return ERR_PTR(ret);
++}
++
++static void drop_gpio_pwm_target(struct config_group *group,
++         struct config_item *item)
++{
++  struct gpio_pwm_target *t;
++
++  t = container_of(item, struct gpio_pwm_target, item);
++
++  gpio_pwm_destroy(t->pdev);
++  config_item_put(&t->item);
++  kfree(t);
++}
++
++#if IS_ENABLED(CONFIG_PWM_GPIO_VERBOSE)
++static const char gpio_pwm_subsys_readme_text[] =
++    "To create a PWM chip make here a directory named with the\n"
++    "number of the GPIO pin to be used as output. \n"
++    "Then you can do with the PWM chip what ever\n"
++    "you want, i.e. go to sysfs under /class/pwm and configure\n"
++    "your new shiny PWM output."
++    "\n"
++    "To destroy your PWM chip, first release all references to\n"
++    "it and then remove the directory here.\n";
++
++static struct configfs_attribute gpio_pwm_subsys_readme_attribute = {
++    .ca_name = "description",
++    .ca_owner = THIS_MODULE,
++    .ca_mode  = S_IRUGO,
++};
++
++static struct configfs_attribute *gpio_pwm_subsys_attr_list[] = {
++    &gpio_pwm_subsys_readme_attribute,
++    0, /* sentinel */
++};
++
++static ssize_t gpio_pwm_show_readme(struct config_item *item,
++    struct configfs_attribute *attr,
++    char *buffer)
++{
++  ssize_t ret = -ENOENT;
++
++  if (&gpio_pwm_subsys_readme_attribute == attr)
++  {
++    strcpy(buffer, gpio_pwm_subsys_readme_text);
++    ret = strlen(gpio_pwm_subsys_readme_text);
++  }
++
++  return ret;
++}
++
++static struct configfs_item_operations gpio_pwm_subsys_item_ops = {
++  .show_attribute = &gpio_pwm_show_readme,
++};
++#else
++static struct configfs_attribute *gpio_pwm_subsys_attr_list[] = {
++    0, /* sentinel */
++};
++
++static struct configfs_item_operations gpio_pwm_subsys_item_ops = {
++};
++#endif
++
++static struct configfs_group_operations gpio_pwm_subsys_group_ops = {
++  .make_item = make_gpio_pwm_target,
++  .drop_item = drop_gpio_pwm_target,
++};
++
++static struct config_item_type gpio_pwm_subsys_type = {
++  .ct_group_ops = &gpio_pwm_subsys_group_ops,
++  .ct_item_ops  = &gpio_pwm_subsys_item_ops,
++  .ct_owner = THIS_MODULE,
++  .ct_attrs = gpio_pwm_subsys_attr_list,
++};
++
++static struct configfs_subsystem gpio_pwm_subsys = {
++  .su_group = {
++    .cg_item = {
++      .ci_name = DRIVER_NAME,
++      .ci_type = &gpio_pwm_subsys_type,
++    },
++  },
++};
++
++#endif
++
++static int __init gpio_pwm_init(void)
++{
++  int ret = 0;
++
++  ret = platform_driver_register(&gpio_pwm_driver);
++
++  if (ret)
++    goto reg_err_exit;
++
++#if IS_ENABLED(CONFIG_CONFIGFS_FS)
++  config_group_init(&gpio_pwm_subsys.su_group);
++  mutex_init(&gpio_pwm_subsys.su_mutex);
++  ret = configfs_register_subsystem(&gpio_pwm_subsys);
++#endif
++
++reg_err_exit:
++  return ret;
++}
++module_init(gpio_pwm_init);
++
++static void __exit gpio_pwm_exit(void)
++{
++#if IS_ENABLED(CONFIG_CONFIGFS_FS)
++  configfs_unregister_subsystem(&gpio_pwm_subsys);
++#endif
++
++  platform_driver_unregister(&gpio_pwm_driver);
++}
++module_exit(gpio_pwm_exit);
++
++MODULE_AUTHOR("Bill Gatliff <bgat@billgatliff.com>");
++MODULE_AUTHOR("Johannes Lode <linuxer@quantentunnel.de>");
++MODULE_DESCRIPTION("PWM channel emulator using GPIO and a high-resolution timer");
++MODULE_VERSION(DRIVER_VERSION);
++MODULE_LICENSE("GPL");
++//MODULE_LICENSE("GPL v2");
++
+--- a/drivers/pwm/Kconfig
++++ b/drivers/pwm/Kconfig
+@@ -80,6 +80,42 @@ config PWM_EP93XX
+ 	  To compile this driver as a module, choose M here: the module
+ 	  will be called pwm-ep93xx.
+ 
++config PWM_GPIO
++    tristate "GPIO+hrtimer PWM device emulation"
++    depends on GPIOLIB
++    help
++      When enabled, this feature emulates single-channel PWM
++      devices using high-resolution timers and GPIO pins.  You may
++      create as many of these devices as desired, subject to CPU
++      throughput limitations and GPIO pin availability.
++
++      If you select CONFIGFS_FS, then you get a user interface from
++      the configuration file system, where you can create PWM devices
++      that operate on the GPIO pin with the same number as the confguration
++      object you created there.
++
++      # mount -t configfs configfs /sys/kernel/config
++      # mkdir /sys/kernel/pwm-gpio/52
++      # ls /sys/class/pwm
++
++      To compile this feature as a module, chose M here; the module
++      will be called pwm-gpio.  If unsure, say N.
++
++if PWM_GPIO
++
++config PWM_GPIO_VERBOSE
++    bool "Put description files into the configFS directories"
++    depends on CONFIGFS_FS
++    help
++      Put some attribute files into the configFS directories, so the user
++      gets informations about the GPIO PWM and its virtual pwm chips.
++
++      Setting this to N saves some bytes of kernel memory per GPIO PWM
++      object (i.e. on embedded systems, which may be short on memory).
++
++endif
++
++
+ config PWM_IMX
+ 	tristate "i.MX PWM support"
+ 	depends on ARCH_MXC

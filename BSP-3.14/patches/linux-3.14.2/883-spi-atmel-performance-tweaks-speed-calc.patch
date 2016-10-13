@@ -1,0 +1,235 @@
+--- a/drivers/spi/spi-atmel.c
++++ b/drivers/spi/spi-atmel.c
+@@ -230,6 +230,7 @@ struct atmel_spi {
+ 	int			done_status;
+ 
+ 	struct completion	xfer_completion;
++	volatile atomic_t xfer_running;
+ 
+ 	/* scratch buffer */
+ 	void			*buffer;
+@@ -247,6 +248,8 @@ struct atmel_spi {
+ struct atmel_spi_device {
+ 	unsigned int		npcs_pin;
+ 	u32			csr;
++	u32     configured_speed_hz;
++  unsigned long wait_sync_threshold;
+ };
+ 
+ #define BUFFER_SIZE		PAGE_SIZE
+@@ -686,44 +689,56 @@ static int atmel_spi_set_xfer_speed(stru
+ {
+ 	u32			scbr, csr;
+ 	unsigned long		bus_hz;
++  struct atmel_spi_device *asd;
+ 
+-	/* v1 chips start out at half the peripheral bus speed. */
+-	bus_hz = clk_get_rate(as->clk);
+-	if (!atmel_spi_is_v2(as))
+-		bus_hz /= 2;
++  asd = spi->controller_state;
+ 
+-	/*
+-	 * Calculate the lowest divider that satisfies the
+-	 * constraint, assuming div32/fdiv/mbz == 0.
+-	 */
+-	if (xfer->speed_hz)
+-		scbr = DIV_ROUND_UP(bus_hz, xfer->speed_hz);
+-	else
+-		/*
+-		 * This can happend if max_speed is null.
+-		 * In this case, we set the lowest possible speed
+-		 */
+-		scbr = 0xff;
+-
+-	/*
+-	 * If the resulting divider doesn't fit into the
+-	 * register bitfield, we can't satisfy the constraint.
+-	 */
+-	if (scbr >= (1 << SPI_SCBR_SIZE)) {
+-		dev_err(&spi->dev,
+-			"setup: %d Hz too slow, scbr %u; min %ld Hz\n",
+-			xfer->speed_hz, scbr, bus_hz/255);
+-		return -EINVAL;
+-	}
+-	if (scbr == 0) {
+-		dev_err(&spi->dev,
+-			"setup: %d Hz too high, scbr %u; max %ld Hz\n",
+-			xfer->speed_hz, scbr, bus_hz);
+-		return -EINVAL;
+-	}
+-	csr = spi_readl(as, CSR0 + 4 * spi->chip_select);
+-	csr = SPI_BFINS(SCBR, scbr, csr);
+-	spi_writel(as, CSR0 + 4 * spi->chip_select, csr);
++  if (asd->configured_speed_hz == xfer->speed_hz) {
++    spi_writel(as, CSR0 + 4 * spi->chip_select, asd->csr);
++  }
++  else {
++    /* v1 chips start out at half the peripheral bus speed. */
++    bus_hz = clk_get_rate(as->clk);
++    if (!atmel_spi_is_v2(as))
++      bus_hz /= 2;
++
++    /*
++     * Calculate the lowest divider that satisfies the
++     * constraint, assuming div32/fdiv/mbz == 0.
++     */
++    if (xfer->speed_hz)
++      scbr = DIV_ROUND_UP(bus_hz, xfer->speed_hz);
++    else
++      /*
++       * This can happend if max_speed is null.
++       * In this case, we set the lowest possible speed
++       */
++      scbr = 0xff;
++
++    /*
++     * If the resulting divider doesn't fit into the
++     * register bitfield, we can't satisfy the constraint.
++     */
++    if (scbr >= (1 << SPI_SCBR_SIZE)) {
++      dev_err(&spi->dev,
++        "setup: %d Hz too slow, scbr %u; min %ld Hz\n",
++        xfer->speed_hz, scbr, bus_hz/255);
++      return -EINVAL;
++    }
++    if (scbr == 0) {
++      dev_err(&spi->dev,
++        "setup: %d Hz too high, scbr %u; max %ld Hz\n",
++        xfer->speed_hz, scbr, bus_hz);
++      return -EINVAL;
++    }
++    csr = spi_readl(as, CSR0 + 4 * spi->chip_select);
++    csr = SPI_BFINS(SCBR, scbr, csr);
++    spi_writel(as, CSR0 + 4 * spi->chip_select, csr);
++    asd->csr = csr;
++
++    // calc the threshold for busy waiting for the end of a DMA or PDC transfer
++    asd->wait_sync_threshold = xfer->speed_hz / (8UL * bus_hz / 1000UL);
++  }
+ 
+ 	return 0;
+ }
+@@ -920,7 +935,9 @@ atmel_spi_pio_interrupt(int irq, void *d
+ 		/* Clear any overrun happening while cleaning up */
+ 		spi_readl(as, SR);
+ 
+-		complete(&as->xfer_completion);
++		if (1 < atomic_read(&as->xfer_running))
++		  complete(&as->xfer_completion);
++    atomic_set(&as->xfer_running, 0);
+ 
+ 	} else if (pending & SPI_BIT(RDRF)) {
+ 		atmel_spi_lock(as);
+@@ -932,7 +949,9 @@ atmel_spi_pio_interrupt(int irq, void *d
+ 			if (!as->current_remaining_bytes)
+ 				spi_writel(as, IDR, pending);
+ 
+-			complete(&as->xfer_completion);
++	    if (1 < atomic_read(&as->xfer_running))
++	      complete(&as->xfer_completion);
++	    atomic_set(&as->xfer_running, 0);
+ 		}
+ 
+ 		atmel_spi_unlock(as);
+@@ -970,14 +989,18 @@ atmel_spi_pdc_interrupt(int irq, void *d
+     /* Clear any overrun happening while cleaning up */
+     spi_readl(as, SR);
+ 
+-		complete(&as->xfer_completion);
++    if (1 < atomic_read(&as->xfer_running))
++      complete(&as->xfer_completion);
++    atomic_set(&as->xfer_running, 0);
+ 
+ 	} else if (pending & (SPI_BIT(RXBUFF) | SPI_BIT(ENDRX))) {
+ 		ret = IRQ_HANDLED;
+ 
+ 		spi_writel(as, IDR, pending);
+ 
+-		complete(&as->xfer_completion);
++    if (1 < atomic_read(&as->xfer_running))
++      complete(&as->xfer_completion);
++		atomic_set(&as->xfer_running, 0);
+ 	}
+ 
+ 	return ret;
+@@ -1048,6 +1071,7 @@ static int atmel_spi_setup(struct spi_de
+ 	}
+ 
+ 	asd->csr = csr;
++	asd->configured_speed_hz = ~0UL;
+ 
+ 	dev_dbg(&spi->dev,
+ 		"setup: bpw %u mode 0x%x -> csr%d %08x\n",
+@@ -1065,9 +1089,9 @@ static int atmel_spi_one_transfer(struct
+ {
+ 	struct atmel_spi	*as;
+ 	struct spi_device	*spi = msg->spi;
++  struct atmel_spi_device *asd = spi->controller_state;
+ 	u8			bits;
+ 	u32			len;
+-	struct atmel_spi_device	*asd;
+ 	int			timeout;
+ 	int			ret = 0;
+ 
+@@ -1079,7 +1103,6 @@ static int atmel_spi_one_transfer(struct
+ 	}
+ 
+ 	if (xfer->bits_per_word) {
+-		asd = spi->controller_state;
+ 		bits = (asd->csr >> 4) & 0xf;
+ 		if (bits != xfer->bits_per_word - 8) {
+ 			dev_dbg(&spi->dev,
+@@ -1114,6 +1137,11 @@ static int atmel_spi_one_transfer(struct
+ 	while (as->current_remaining_bytes) {
+ 		reinit_completion(&as->xfer_completion);
+ 
++		if (as->current_remaining_bytes > asd->wait_sync_threshold)
++		  atomic_set(&as->xfer_running, 1); // wait sync
++		else
++		  atomic_set(&as->xfer_running, 2); // wait async
++
+ 		if (as->use_pdc) {
+       atmel_spi_pdc_next_xfer(master, msg, xfer);
+ 		} else if (atmel_spi_use_dma(as, xfer)) {
+@@ -1123,18 +1151,27 @@ static int atmel_spi_one_transfer(struct
+ 			if (ret) {
+ 				dev_err(&spi->dev,
+ 					"unable to use DMA, fallback to PIO\n");
++        atomic_set(&as->xfer_running, 2); // wait async
+         atmel_spi_next_xfer_pio(master, xfer);
+ 			} else {
+         as->current_remaining_bytes -= len;
+       }
+ 		} else {
++      atomic_set(&as->xfer_running, 2); // wait async
+ 			atmel_spi_next_xfer_pio(master, xfer);
+ 		}
+ 
+-	  atmel_spi_unlock(as);
+-		ret = wait_for_completion_timeout(&as->xfer_completion,
+-							SPI_DMA_TIMEOUT);
+-	  atmel_spi_lock(as);
++		if (1 < atomic_read(&as->xfer_running)) {
++      atmel_spi_unlock(as);
++      ret = wait_for_completion_timeout(&as->xfer_completion,
++                SPI_DMA_TIMEOUT);
++      atmel_spi_lock(as);
++    }
++		else {
++      while (atomic_read(&as->xfer_running))
++        ;
++      ret = 0;
++    }
+ 
+ 		if (WARN_ON(ret == 0)) {
+ 			dev_err(&spi->dev,
+@@ -1242,7 +1279,7 @@ static int atmel_spi_transfer_one_messag
+ 	    if (!list_is_last(&xfer->transfer_list,
+ 	         &msg->transfers)) {
+ 	      cs_deactivate(as, spi);
+-	      ndelay(50);
++	      ndelay(10);
+ 	    }
+ 	  } else {
+ 	    if (list_is_last(&xfer->transfer_list,

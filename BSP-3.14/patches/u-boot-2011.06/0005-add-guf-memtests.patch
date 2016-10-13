@@ -1,0 +1,574 @@
+Index: u-boot-2011.06/common/cmd_mem.c
+===================================================================
+--- u-boot-2011.06.orig/common/cmd_mem.c
++++ u-boot-2011.06/common/cmd_mem.c
+@@ -40,6 +40,70 @@
+ #define PRINTF(fmt,args...)
+ #endif
+ 
++#if defined(CONFIG_SYS_GUF_MEMTEST)
++static ulong idum = 0;
++static ulong prng(void)
++{
++	idum = idum * 1664525 + 1013904223;
++	return idum;
++}
++
++void _mem_blockcopy(volatile void *dest, volatile void *src); // in blockcopy.S
++
++static ulong mem_block_check(volatile void *ra, vu_long buffer[8], vu_long val[8])
++{
++	if (memcmp((void *)buffer, (void *)val, 8*sizeof(ulong)))
++	{
++		printf("ERR: 0x%.8lx is  0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx\n",
++			(ulong)ra, buffer[0], buffer[1], buffer[2], buffer[3], buffer[4], buffer[5], buffer[6], buffer[7]);
++		printf("         should be  0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx, mask 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx 0x%.8lx\n",
++			val[0], val[1], val[2], val[3], val[4], val[5], val[6], val[7],
++			(buffer[0] ^ val[0]), (buffer[1] ^ val[1]), (buffer[2] ^ val[2]), (buffer[3] ^ val[3]),
++			(buffer[4] ^ val[4]), (buffer[5] ^ val[5]), (buffer[6] ^ val[6]), (buffer[7] ^ val[7]));
++		return 1;
++	}
++	return 0;
++}
++
++static ulong mem_single_check(volatile void *ra, ulong pattern, ulong val)
++{
++	if (val != pattern)
++	{
++		printf("ERR: 0x%.8lx is 0x%.8lx, should be 0x%.8lx, mask 0x%.8lx\n",
++			(ulong)ra, val, pattern, (val^pattern));
++		return 1;
++	}
++	return 0;
++}
++
++static void mem_block_initmagic(vu_long buffer[8], int i)
++{
++	// Note: For triggering on the Hynix RAM problem on NESO (ticket #916)
++    // ensure that most-significant bit of every 16 Bit word is always written as 0
++	buffer[0] = ((i & 0xffff) | (i << 16)); //  & 0x7fff7fff;
++	buffer[1] = ((i >> 16) | (i & 0xffff0000)); //  & 0x7fff7fff;
++	buffer[2] = (0x00000000); //  & 0x7fff7fff;
++	buffer[3] = (0xffffffff); //  & 0x7fff7fff;
++	buffer[4] = (0x00000000); //  & 0x7fff7fff;
++	buffer[5] = (0xffffffff); //  & 0x7fff7fff;
++	buffer[6] = (i); //  & 0x7fff7fff;
++	buffer[7] = (~i); //  & 0x7fff7fff;
++}
++
++static void mem_block_initrnd(vu_long buffer[8])
++{
++	buffer[0] = prng(); // & 0x7fff7fff;
++	buffer[1] = prng(); // & 0x7fff7fff;
++	buffer[2] = prng(); // & 0x7fff7fff;
++	buffer[3] = prng(); // & 0x7fff7fff;
++	buffer[4] = prng(); // & 0x7fff7fff;
++	buffer[5] = prng(); // & 0x7fff7fff;
++	buffer[6] = prng(); // & 0x7fff7fff;
++	buffer[7] = prng(); // & 0x7fff7fff;
++}
++
++#endif
++
+ static int mod_mem(cmd_tbl_t *, int, int, int, char * const []);
+ 
+ /* Display values from last command.
+@@ -618,8 +682,10 @@ int do_mem_loopw (cmd_tbl_t *cmdtp, int
+ int do_mem_mtest (cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
+ {
+ 	vu_long	*addr, *start, *end;
++#if !defined(CONFIG_SYS_GUF_MEMTEST)
+ 	ulong	val;
+ 	ulong	readback;
++#endif
+ 	ulong	errs = 0;
+ 	int iterations = 1;
+ 	int iteration_limit;
+@@ -639,6 +705,7 @@ int do_mem_mtest (cmd_tbl_t *cmdtp, int
+ #endif
+ 	int	j;
+ 
++
+ 	static const ulong bitpattern[] = {
+ 		0x00000001,	/* single bit */
+ 		0x00000003,	/* two adjacent bits */
+@@ -649,6 +716,42 @@ int do_mem_mtest (cmd_tbl_t *cmdtp, int
+ 		0x00000055,	/* four non-adjacent bits */
+ 		0xaaaaaaaa,	/* alternating 1/0 */
+ 	};
++#elif defined(CONFIG_SYS_GUF_MEMTEST)
++	vu_short *haddr;
++	vu_char  *baddr;
++	ulong	pattern;
++	ulong	antipattern;
++	ulong	len;
++	ulong 	i;
++	ulong	l1cache_state;
++	ulong	l1cache_on;
++	const char *str_test_fill = "\tfill\n";
++	const char *str_test_check = "\tcheck\n";
++	const char *str_test_fill_random = "\tfill random\n";
++	const char *str_test_check_random = "\tcheck random\n";
++	const char *str_test_fill_check = "\tfill+check\n";
++	vu_long buffer[8];
++	vu_long values[8];
++	vu_long blackpattern[8] = {
++		0x00000000,
++		0x00000000,
++		0x00000000,
++		0x00000000,
++		0x00000000,
++		0x00000000,
++		0x00000000,
++		0x00000000,
++	};
++	vu_long checkpattern[8] = {
++		0x00000000,
++		0xffffffff,
++		0x00000000,
++		0xffffffff,
++		0x00000000,
++		0xffffffff,
++		0x00000000,
++		0xffffffff,
++	};
+ #else
+ 	ulong	incr;
+ 	ulong	pattern;
+@@ -713,7 +816,7 @@ int do_mem_mtest (cmd_tbl_t *cmdtp, int
+ 		 * '0's and '0' bits through a field of '1's (i.e.
+ 		 * pattern and ~pattern).
+ 		 */
+-		addr = start;
++		addr  = start;
+ 		for (j = 0; j < sizeof(bitpattern)/sizeof(bitpattern[0]); j++) {
+ 		    val = bitpattern[j];
+ 		    for(; val != 0; val <<= 1) {
+@@ -902,7 +1005,331 @@ int do_mem_mtest (cmd_tbl_t *cmdtp, int
+ 		    start[offset] = 0;
+ 		}
+ 	}
++#elif defined(CONFIG_SYS_GUF_MEMTEST)
++	l1cache_state =  dcache_status();
++	len = (((ulong)end - (ulong)start)/sizeof(vu_long)); /* only DWORD access */
++	for (;;) {
++		if (ctrlc()) {
++			putc ('\n');
++			/* restore cache configuration */
++			if (l1cache_state) {
++				dcache_enable();
++				icache_enable();
++			} else {
++				invalidate_dcache_all();
++				dcache_disable();
++				invalidate_icache_all();
++				icache_disable();
++			}
++			return 1;
++		}
+ 
++		if (iteration_limit && iterations > iteration_limit) {
++			printf("Tested %d iteration(s) with %lu errors.\n",
++				iterations-1, errs);
++			if (iteration_limit > 1) {
++				/* restore cache configuration */
++				if (l1cache_state) {
++					dcache_enable();
++					icache_enable();
++				} else {
++					invalidate_dcache_all();
++					dcache_disable();
++					invalidate_icache_all();
++					icache_disable();
++				}
++			}
++			return errs != 0;
++		}
++		++iterations;
++
++		addr = start;
++		haddr = (vu_short*)start;
++		baddr = (vu_char*)start;
++		l1cache_on = dcache_status();
++		printf("Checking 0x%.8lx, 0x%.8lx run %u (caches: %s)\n", (ulong)start, len<<2, iterations-1,
++			l1cache_on ? "on" : "off");
++
++		printf("0. Blocktest\n");
++
++		printf("...blackblock\n");
++		printf(str_test_fill);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy(&addr[i], (void*)blackpattern);
++		}
++
++		printf(str_test_check);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			errs += mem_block_check(&addr[i], buffer, blackpattern);
++		}
++
++		printf("...checkerblock\n");
++		printf(str_test_fill);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy(&addr[i], (void*)checkpattern);
++		}
++		printf(str_test_check);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			errs += mem_block_check(&addr[i], buffer, checkpattern);
++		}
++
++		printf("...fastblock\n");
++		printf(str_test_fill);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			mem_block_initmagic(values, i);
++			_mem_blockcopy(&addr[i], (void*)values);
++		}
++		printf(str_test_check);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			mem_block_initmagic(values, i);
++			errs += mem_block_check(&addr[i], buffer, values);
++		}
++
++		printf(str_test_fill_random);
++		idum = 0x4709;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			mem_block_initmagic(values, ((ulong)&addr[(pattern % len) & ~0x7])>>5);
++			_mem_blockcopy(&addr[(pattern % len) & ~0x7], (void*)values);
++		}
++		printf(str_test_check_random);
++		idum = 0x4709;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			_mem_blockcopy((void*)buffer, &addr[(pattern % len) & ~0x7]);
++			mem_block_initmagic(values, ((ulong)&addr[(pattern % len) & ~0x7])>>5);
++			errs += mem_block_check(&addr[(pattern % len) & ~0x3], buffer, values);
++		}
++
++		printf(str_test_fill_check);
++		idum = 17;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			mem_block_initmagic(values, i);
++			_mem_blockcopy(&addr[i], (void*)values);
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			errs += mem_block_check(&addr[i], buffer, values);
++		}
++
++		printf("...block\n");
++		printf(str_test_fill);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			mem_block_initrnd(values);
++			_mem_blockcopy(&addr[i], (void*)values);
++		}
++		printf(str_test_check);
++		idum = 0;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			mem_block_initrnd(values);
++			errs += mem_block_check(&addr[i], buffer, values);
++		}
++		printf(str_test_fill_check);
++		idum = 17;
++		for (i = 0; i < len; i+=8) {
++			WATCHDOG_RESET();
++			mem_block_initrnd(values);
++			_mem_blockcopy(&addr[i], (void*)values);
++			_mem_blockcopy((void*)buffer, &addr[i]);
++			errs += mem_block_check(&addr[i], buffer, values);
++		}
++
++		printf("...4B\n");
++		printf(str_test_fill);
++		idum = 23;
++		for (i = 0; i < len; i++) {
++			WATCHDOG_RESET();
++			addr[i] = prng();
++		}
++		printf(str_test_check);
++		idum = 23;
++		for (i = 0; i < len; i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			errs += mem_single_check(&addr[i], pattern, addr[i]);
++		}
++		printf(str_test_fill_random);
++		idum = 0x4711;
++		for (i = 0; i < len; i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			addr[pattern % len] = (ulong)&addr[pattern % len];
++		}
++		printf(str_test_check_random);
++		idum = 0x4711;
++		for (i = 0; i < len; i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			errs += mem_single_check(&addr[pattern % len], (ulong)&addr[pattern % len], addr[pattern % len]);
++		}
++		printf(str_test_fill_check);
++		idum = 42;
++		for (i = 0; i < len; i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			addr[i] = pattern;
++			errs += mem_single_check(&addr[i], pattern, addr[i]);
++		}
++
++		printf("...2B\n");
++		printf(str_test_fill);
++		idum = 47;
++		i=0;
++		for (i = 0; i < (len<<1); i++) {
++			WATCHDOG_RESET();
++			haddr[i] = (ushort)(prng() >> 16);
++		}
++		printf(str_test_check);
++		idum = 47;
++		for (i = 0; i < (len<<1); i++) {
++			WATCHDOG_RESET();
++			pattern = prng()>>16;
++			errs += mem_single_check(&haddr[i], pattern, haddr[i]);
++		}
++		printf(str_test_fill_random);
++		idum = 0x4712;
++		for (i = 0; i < (len<<1); i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			haddr[pattern % (len<<1)] = (ushort)((ulong)&haddr[pattern % (len<<1)]);
++		}
++		printf(str_test_check_random);
++		idum = 0x4712;
++		for (i = 0; i < (len<<1); i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			errs += mem_single_check(&haddr[pattern % (len<<1)], (ushort)((ulong)&haddr[pattern % (len<<1)]), haddr[pattern % (len<<1)]);
++		}
++		printf(str_test_fill_check);
++		idum = 815;
++		for (i = 0; i < (len<<1); i++) {
++			WATCHDOG_RESET();
++			pattern = prng()>>16;
++			haddr[i] = (ushort)pattern;
++			errs += mem_single_check(&haddr[i], pattern, haddr[i]);
++		}
++
++		printf("...1B\n");
++		printf(str_test_fill);
++		idum = 4711;
++		for (i = 0; i < (len<<2); i++) {
++			WATCHDOG_RESET();
++			baddr[i] = (uchar)(prng() >> 24);
++		}
++		printf(str_test_check);
++		idum = 4711;
++		for (i = 0; i < (len<<2); i++) {
++			WATCHDOG_RESET();
++			pattern = prng()>>24;
++			errs += mem_single_check(&baddr[i], pattern, baddr[i]);
++		}
++		printf(str_test_fill_random);
++		idum = 0x4713;
++		for (i = 0; i < (len<<2); i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			baddr[pattern % (len<<2)] = (uchar)((unsigned long)&baddr[pattern % (len<<2)]);
++		}
++		printf(str_test_check_random);
++		idum = 0x4713;
++		for (i = 0; i < (len<<2); i++) {
++			WATCHDOG_RESET();
++			pattern = prng();
++			errs += mem_single_check(&baddr[pattern % (len<<2)], (uchar)((ulong)&baddr[pattern % (len<<2)]), baddr[pattern % (len<<2)]);
++		}
++		printf(str_test_fill_check);
++		idum = 2305;
++		for (i = 0; i < (len<<2); i++) {
++			WATCHDOG_RESET();
++			pattern = prng()>>24;
++			baddr[i] = (uchar)pattern;
++			errs += mem_single_check(&baddr[i], pattern, baddr[i]);
++		}
++
++		printf("1. fill with pattern\n");
++		for (pattern = 1, i = 0; i < len; pattern++, i++) {
++			WATCHDOG_RESET();
++			addr[i] = pattern;
++		}
++
++		printf("2. check and invert content\n");
++		for (pattern = 1, i = 0; i < len; pattern++, i++) {
++			WATCHDOG_RESET();
++			errs += mem_single_check(&addr[i], pattern, addr[i]);
++			antipattern = ~pattern;
++			addr[i] = antipattern;
++		}
++
++		printf("3. check inverted and clear\n");
++		for (pattern = 1, i = 0; i < len; pattern++, i++) {
++			WATCHDOG_RESET();
++			antipattern = ~pattern;
++			errs += mem_single_check(&addr[i], antipattern, addr[i]);
++			addr[i] = 0;
++		}
++
++		printf("4. reverse fill\n");
++		for (pattern = 1, i = (len-1); i > 0; pattern++, i--) {
++			WATCHDOG_RESET();
++			errs += mem_single_check(&addr[i], 0, addr[i]);
++			addr[i] = pattern;
++		}
++
++		printf("5. reverse check and invert content\n");
++		for (pattern = 1, i = (len-1); i > 0; pattern++, i--) {
++			WATCHDOG_RESET();
++			errs += mem_single_check(&addr[i], pattern, addr[i]);
++			antipattern = ~pattern;
++			addr[i] = antipattern;
++		}
++
++		printf("6. reverse check inverted and set\n");
++		for (pattern = 1, i = (len-1); i > 0; pattern++, i--) {
++			WATCHDOG_RESET();
++			antipattern = ~pattern;
++			errs += mem_single_check(&addr[i], antipattern, addr[i]);
++			addr[i] = 0xffffffff;
++		}
++
++		printf("7. check set\n");
++		for (pattern = 1, i = (len-1); i > 0; pattern++, i--) {
++			WATCHDOG_RESET();
++			errs += mem_single_check(&addr[i], 0xffffffff, addr[i]);
++		}
++
++		if (iteration_limit != 1) {
++			if (l1cache_on) {
++				invalidate_dcache_all();
++				dcache_disable();
++				invalidate_icache_all();
++				icache_disable();
++			}
++			else {
++				dcache_enable();
++				icache_enable();
++			}
++		}
++	}
+ #else /* The original, quickie test */
+ 	incr = 1;
+ 	for (;;) {
+Index: u-boot-2011.06/common/blockcopy.S
+===================================================================
+--- /dev/null
++++ u-boot-2011.06/common/blockcopy.S
+@@ -0,0 +1,17 @@
++#########################################
++# Parameters:
++#   r0 - destination address
++#   r1 - source address
++# Retrurn:
++#   none
++#########################################
++	.text
++	.code 32
++	.align 2
++	.global _mem_blockcopy
++
++_mem_blockcopy:
++	stmfd	sp!, {r3-r10, lr}
++	ldmia	r1, {r3-r10}
++	stmia	r0, {r3-r10}
++	ldmfd	sp!, {r3-r10, pc}
+Index: u-boot-2011.06/common/Makefile
+===================================================================
+--- u-boot-2011.06.orig/common/Makefile
++++ u-boot-2011.06/common/Makefile
+@@ -113,6 +113,7 @@ COBJS-$(CONFIG_LOGBUFFER) += cmd_log.o
+ COBJS-$(CONFIG_ID_EEPROM) += cmd_mac.o
+ COBJS-$(CONFIG_CMD_MD5SUM) += cmd_md5sum.o
+ COBJS-$(CONFIG_CMD_MEMORY) += cmd_mem.o
++SOBJS-$(CONFIG_CMD_MEMORY) += blockcopy.o
+ COBJS-$(CONFIG_CMD_MFSL) += cmd_mfsl.o
+ COBJS-$(CONFIG_CMD_MG_DISK) += cmd_mgdisk.o
+ COBJS-$(CONFIG_MII) += miiphyutil.o
+@@ -181,9 +182,10 @@ COBJS-y += stdio.o
+ 
+ 
+ COBJS	:= $(sort $(COBJS-y))
++SOBJS	:= $(sort $(SOBJS-y))
+ XCOBJS	:= $(sort $(XCOBJS-y))
+ SRCS	:= $(COBJS:.o=.c) $(XCOBJS:.o=.c)
+-OBJS	:= $(addprefix $(obj),$(COBJS))
++OBJS	:= $(addprefix $(obj),$(COBJS) $(SOBJS))
+ XOBJS	:= $(addprefix $(obj),$(XCOBJS))
+ 
+ CPPFLAGS += -I..
+Index: u-boot-2011.06/arch/arm/lib/cache.c
+===================================================================
+--- u-boot-2011.06.orig/arch/arm/lib/cache.c
++++ u-boot-2011.06/arch/arm/lib/cache.c
+@@ -43,6 +43,45 @@ void  __flush_cache(unsigned long start,
+ void  flush_cache(unsigned long start, unsigned long size)
+ 	__attribute__((weak, alias("__flush_cache")));
+ 
++void __invalidate_dcache_all(void)
++{
++#ifdef CONFIG_ARM926EJS
++    asm volatile (                                                      \
++	"mov    r0,#0;"                                                 	\
++        "mcr    p15,0,r0,c7,c6,0;" /* flush d-cache */                  \
++        "mcr    p15,0,r0,c8,c7,0;" /* flush i+d-TLBs */                 \
++        :                                                               \
++        :                                                               \
++        : "r0","memory" /* clobber list */);
++#endif
++	return;
++}
++void  invalidate_dcache_all(void)
++	__attribute__((weak, alias("__invalidate_dcache_all")));
++
++void __invalidate_icache_all(void)
++{
++#ifdef CONFIG_ARM926EJS
++    asm volatile (                                                      \
++        "mov    r1,#0;"                                                 \
++        "mcr    p15,0,r1,c7,c5,0;"  /* flush ICache */                  \
++        "mcr    p15,0,r1,c8,c5,0;"  /* flush ITLB only */               \
++        "nop;" /* next few instructions may be via cache    */          \
++        "nop;"                                                          \
++        "nop;"                                                          \
++        "nop;"                                                          \
++        "nop;"                                                          \
++        "nop;"                                                          \
++        :                                                               \
++        :                                                               \
++        : "r1" /* Clobber list */                                       \
++        );
++#endif
++	return;
++}
++void  invalidate_icache_all(void)
++	__attribute__((weak, alias("__invalidate_icache_all")));
++
+ /*
+  * Default implementation:
+  * do a range flush for the entire range

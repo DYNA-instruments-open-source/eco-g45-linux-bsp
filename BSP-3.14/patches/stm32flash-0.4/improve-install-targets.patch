@@ -1,0 +1,19 @@
+--- a/Makefile
++++ b/Makefile
+@@ -1,4 +1,4 @@
+-PREFIX = /usr/local
++PREFIX ?= /usr/local
+ CFLAGS += -Wall -g
+ 
+ INSTALL = install
+@@ -32,7 +32,9 @@ clean:
+ install: all
+ 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin
+ 	$(INSTALL) -m 755 stm32flash $(DESTDIR)$(PREFIX)/bin
++
++install.doc:
+ 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/share/man/man1
+ 	$(INSTALL) -m 644 stm32flash.1 $(DESTDIR)$(PREFIX)/share/man/man1
+ 
+-.PHONY: all clean install
++.PHONY: all clean install install.doc

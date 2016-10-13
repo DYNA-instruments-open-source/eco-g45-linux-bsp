@@ -1,0 +1,53 @@
+From 21eec95759dc78e4d977145b3830fae40a844c12 Mon Sep 17 00:00:00 2001
+From: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Date: Mon, 4 Jan 2010 18:24:49 +0000
+Subject: [PATCH 12/59] mx31ads: Convert 1133-EV1 to use dev_name to specify consumer devices
+
+This means we don't need to go running round working out struct
+devices at runtime.
+
+Signed-off-by: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+---
+ arch/arm/mach-mx3/mx31ads.c |   14 ++------------
+ 1 files changed, 2 insertions(+), 12 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx3/mx31ads.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mx31ads.c
++++ linux-2.6.33/arch/arm/mach-mx3/mx31ads.c
+@@ -309,12 +309,8 @@ static struct regulator_init_data ldo1_d
+ };
+ 
+ static struct regulator_consumer_supply ldo2_consumers[] = {
+-	{
+-		.supply = "AVDD",
+-	},
+-	{
+-		.supply = "HPVDD",
+-	},
++	{ .supply = "AVDD", .dev_name = "1-001a" },
++	{ .supply = "HPVDD", .dev_name = "1-001a" },
+ };
+ 
+ /* CODEC and SIM */
+@@ -385,8 +381,6 @@ static struct wm8350_audio_platform_data
+ 
+ static int mx31_wm8350_init(struct wm8350 *wm8350)
+ {
+-	int i;
+-
+ 	wm8350_gpio_config(wm8350, 0, WM8350_GPIO_DIR_IN,
+ 			   WM8350_GPIO0_PWR_ON_IN, WM8350_GPIO_ACTIVE_LOW,
+ 			   WM8350_GPIO_PULL_UP, WM8350_GPIO_INVERT_OFF,
+@@ -422,10 +416,6 @@ static int mx31_wm8350_init(struct wm835
+ 			   WM8350_GPIO_PULL_NONE, WM8350_GPIO_INVERT_OFF,
+ 			   WM8350_GPIO_DEBOUNCE_OFF);
+ 
+-	/* Fix up for our own supplies. */
+-	for (i = 0; i < ARRAY_SIZE(ldo2_consumers); i++)
+-		ldo2_consumers[i].dev = wm8350->dev;
+-
+ 	wm8350_register_regulator(wm8350, WM8350_DCDC_1, &sw1a_data);
+ 	wm8350_register_regulator(wm8350, WM8350_DCDC_3, &viohi_data);
+ 	wm8350_register_regulator(wm8350, WM8350_DCDC_4, &violo_data);

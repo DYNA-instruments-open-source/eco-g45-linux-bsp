@@ -1,0 +1,29 @@
+From 7921f009e63a854be9b57cbd106af83630e815b0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Wed, 9 Dec 2009 20:09:35 +0100
+Subject: [PATCH 07/59] imx/mx1: add newline at end of Makefile
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Cc: Sascha Hauer <kernel@pengutronix.de>
+Cc: Russell King <linux@arm.linux.org.uk>
+Cc: Paulius Zaleckas <paulius.zaleckas@teltonika.lt>
+Cc: Darius Augulis <augulis.darius@gmail.com>
+Cc: Mauro Carvalho Chehab <mchehab@redhat.com>
+---
+ arch/arm/mach-mx1/Makefile |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx1/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx1/Makefile
++++ linux-2.6.33/arch/arm/mach-mx1/Makefile
+@@ -11,4 +11,4 @@ obj-$(CONFIG_MX1_VIDEO)	+= ksym_mx1.o mx
+ 
+ # Specific board support
+ obj-$(CONFIG_ARCH_MX1ADS) += mx1ads.o
+-obj-$(CONFIG_MACH_SCB9328) += scb9328.o
+\ No newline at end of file
++obj-$(CONFIG_MACH_SCB9328) += scb9328.o

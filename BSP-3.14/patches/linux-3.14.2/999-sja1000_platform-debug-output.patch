@@ -1,0 +1,259 @@
+--- a/drivers/net/can/sja1000/sja1000_platform.c
++++ b/drivers/net/can/sja1000/sja1000_platform.c
+@@ -26,6 +26,7 @@
+ #include <linux/can/dev.h>
+ #include <linux/can/platform/sja1000.h>
+ #include <linux/io.h>
++#include <linux/gpio.h>
+ 
+ #include "sja1000.h"
+ 
+@@ -36,34 +37,224 @@ MODULE_DESCRIPTION("Socket-CAN driver fo
+ MODULE_ALIAS("platform:" DRV_NAME);
+ MODULE_LICENSE("GPL v2");
+ 
++bool iodbg[] = { false, false, false };
++module_param_array(iodbg, bool, 0, 0644);
++MODULE_PARM_DESC(iodbg, " enable debug output of IO ops; array of bool for read,write,readback");
++
++uint8_t testMode = 0;
++module_param(testMode, byte, 0644);
++MODULE_PARM_DESC(testMode, " Nummer des Testpattern; 0->off (default), 1->walking bit, 2->checker pattern, 3->user data ");
++uint8_t testData[] = { 0x55, 0xAA, 0x33, 0xCC, 0x88, 0x44, 0x22, 0x11 };
++unsigned testDataLength = ARRAY_SIZE(testData);
++module_param_array(testData, byte, &testDataLength, 0644);
++MODULE_PARM_DESC(testData, " Array bis zu 8 Bytes mit Testdaten; default: 0x55, 0xAA, 0x33, 0xCC, 0x88, 0x44, 0x22, 0x11");
++uint8_t testAddress[] = { 14, 15, 109, 110, 111, 109, 110, 111 };
++unsigned testAddressLength = ARRAY_SIZE(testAddress);
++module_param_array(testAddress, byte, &testAddressLength, 0644);
++MODULE_PARM_DESC(testAddress, " Array bis zu 8 Register-Adressen als Testzellen; default: 14, 15, 109, 110, 111, 111, 110, 109");
++uint  testCount = 256;
++module_param(testCount, uint, 0644);
++MODULE_PARM_DESC(testCount, " Anzahl der Test-Runden; default: 256");
++int   testTriggerGpio = 107;
++module_param(testTriggerGpio, int, 0644);
++MODULE_PARM_DESC(testTriggerGpio, " GPIO pin Nummer als Trigger bei Write (write pulse); default 107, -1 = off");
++
++static
++void test_walking_bit(const struct sja1000_priv* priv, unsigned n, bool walk_zero)
++{
++  unsigned i,j;
++
++  for (i = 0; i < testAddressLength; i++)
++  {
++    u8 bit = 1 << ((n + i) % 8);
++
++    if (walk_zero)
++      bit = ~bit;
++
++    if (-1 < testTriggerGpio)
++      gpio_set_value(testTriggerGpio, 1);
++
++    priv->write_reg(priv, testAddress[i], bit);
++
++    if (-1 < testTriggerGpio)
++      gpio_set_value(testTriggerGpio, 0);
++
++    for (j = 1; j <= testAddressLength; j++)
++      priv->read_reg(priv, testAddress[(i + j) % testAddressLength]);
++  }
++}
++
++static
++void test_checker_pattern(const struct sja1000_priv* priv, unsigned n)
++{
++  unsigned j;
++
++  u8 bit = 0x55;
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 1);
++
++  priv->write_reg(priv, testAddress[n % testAddressLength], bit);
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 0);
++
++  for (j = 1; j <= testAddressLength; j++)
++    priv->read_reg(priv, testAddress[(n + j) % testAddressLength]);
++
++  bit = 0xAA;
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 1);
++
++  priv->write_reg(priv, testAddress[n % testAddressLength], bit);
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 0);
++
++  for (j = 1; j <= testAddressLength; j++)
++    priv->read_reg(priv, testAddress[(n + j) % testAddressLength]);
++}
++
++static
++void test_linear_user_data(const struct sja1000_priv* priv, unsigned n)
++{
++  unsigned j;
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 1);
++
++  priv->write_reg(priv, testAddress[n % testAddressLength], testData[n % testDataLength]);
++
++  if (-1 < testTriggerGpio)
++    gpio_set_value(testTriggerGpio, 0);
++
++  for (j = 1; j <= testAddressLength; j++)
++    priv->read_reg(priv, testAddress[(n + j) % testAddressLength]);
++}
++
++static
++void do_test(const struct sja1000_priv* priv)
++{
++  unsigned n;
++
++  // GPIO konfigurieren
++  if (gpio_is_valid(testTriggerGpio))
++  {
++    gpio_request(testTriggerGpio, DRV_NAME);
++    gpio_direction_output(testTriggerGpio, 1);
++    gpio_set_value(testTriggerGpio, 0);
++  }
++  else
++    testTriggerGpio = -1;
++
++  // alle betroffenen Register einmal lesen
++  for (n = 0; n < testAddressLength; n++)
++  {
++    priv->read_reg(priv, testAddress[n]);
++  }
++
++  // Testrunden fahren
++  for(n = 0; n < testCount; n++)
++  {
++    switch(testMode)
++    {
++    case 1:
++      test_walking_bit(priv, n, 0);
++      test_walking_bit(priv, n, 1);
++      break;
++    case 2:
++      test_checker_pattern(priv, n);
++      break;
++    case 3:
++      test_linear_user_data(priv, n);
++      break;
++    }
++  }
++
++  // alle Register nochmal lesen
++  for (n = 0; n < testAddressLength; n++)
++  {
++    priv->read_reg(priv, testAddress[n]);
++  }
++
++  // Reset-Mode wieder herstellen
++  priv->write_reg(priv, 0, 1);
++
++  if (gpio_is_valid(testTriggerGpio))
++  {
++    gpio_free(testTriggerGpio);
++  }
++}
++
++
+ static u8 sp_read_reg8(const struct sja1000_priv *priv, int reg)
+ {
+-	return ioread8(priv->reg_base + reg);
++  u8 val = ioread8(priv->reg_base + reg);
++
++  if (iodbg[0])
++    pr_info(DRV_NAME ": sp_read_reg8(0x%02x): @%8p = 0x%02x\n", reg, priv->reg_base + reg, val);
++
++  return val;
+ }
+ 
+ static void sp_write_reg8(const struct sja1000_priv *priv, int reg, u8 val)
+ {
+ 	iowrite8(val, priv->reg_base + reg);
++
++  if (iodbg[1])
++    pr_info(DRV_NAME ": sp_write_reg8(0x%02x, 0x%02x): @%8p = 0x%02x\n", reg, val, priv->reg_base + reg, val);
++
++  if (iodbg[2]) {
++    val = ioread8(priv->reg_base + reg);
++    pr_info(DRV_NAME ": sp_write_reg8(0x%02x) read back: @%8p = 0x%02x\n", reg, priv->reg_base + reg, val);
++  }
+ }
+ 
+ static u8 sp_read_reg16(const struct sja1000_priv *priv, int reg)
+ {
+-	return ioread8(priv->reg_base + reg * 2);
++  u8 val = ioread8(priv->reg_base + reg * 2);
++
++  if (iodbg[0])
++    pr_info(DRV_NAME ": sp_read_reg16(0x%02x): @%8p = 0x%02x\n", reg, priv->reg_base + reg * 2, val);
++
++  return val;
+ }
+ 
+ static void sp_write_reg16(const struct sja1000_priv *priv, int reg, u8 val)
+ {
+ 	iowrite8(val, priv->reg_base + reg * 2);
++
++  if (iodbg[1])
++    pr_info(DRV_NAME ": sp_write_reg16(0x%02x, 0x%02x): @%8p = 0x%02x\n", reg, val, priv->reg_base + reg * 2, val);
++
++  if (iodbg[2]) {
++    val = ioread8(priv->reg_base + reg * 2);
++    pr_info(DRV_NAME ": sp_write_reg8(0x%02x) read back: @%8p = 0x%02x\n", reg, priv->reg_base + reg * 2, val);
++  }
+ }
+ 
+ static u8 sp_read_reg32(const struct sja1000_priv *priv, int reg)
+ {
+-	return ioread8(priv->reg_base + reg * 4);
++  u8 val = ioread8(priv->reg_base + reg * 4);
++
++  if (iodbg[0])
++    pr_info(DRV_NAME ": sp_read_reg32(0x%02x): @%8p = 0x%02x\n", reg, priv->reg_base + reg * 4, val);
++
++  return val;
+ }
+ 
+ static void sp_write_reg32(const struct sja1000_priv *priv, int reg, u8 val)
+ {
+ 	iowrite8(val, priv->reg_base + reg * 4);
++
++  if (iodbg[1])
++    pr_info(DRV_NAME ": sp_write_reg32(0x%02x, 0x%02x): @%8p = 0x%02x\n", reg, val, priv->reg_base + reg * 4, val);
++
++  if (iodbg[2]) {
++    val = ioread8(priv->reg_base + reg * 4);
++    pr_info(DRV_NAME ": sp_write_reg8(0x%02x) read back: @%8p = 0x%02x\n", reg, priv->reg_base + reg * 4, val);
++  }
+ }
+ 
+ static int sp_probe(struct platform_device *pdev)
+@@ -137,6 +328,7 @@ static int sp_probe(struct platform_devi
+ 	platform_set_drvdata(pdev, dev);
+ 	SET_NETDEV_DEV(dev, &pdev->dev);
+ 
++	if (!testMode)	{
+ 	err = register_sja1000dev(dev);
+ 	if (err) {
+ 		dev_err(&pdev->dev, "registering %s failed (err=%d)\n",
+@@ -147,6 +339,12 @@ static int sp_probe(struct platform_devi
+ 	dev_info(&pdev->dev, "%s device registered (reg_base=%p, irq=%d)\n",
+ 		 DRV_NAME, priv->reg_base, dev->irq);
+ 	return 0;
++	}
++	else {
++	  do_test(priv);
++	  err = -EIO;
++	  goto exit_iounmap;
++	}
+ 
+  exit_free:
+ 	free_sja1000dev(dev);

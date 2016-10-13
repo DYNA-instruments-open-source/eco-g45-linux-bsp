@@ -1,0 +1,23 @@
+Subject: add qclucene to LIBS not LIBS_PRIVATE
+From: Michael Olbrich <m.olbrich@pengutronix.de>
+
+Without this patch qclucene is not marked as a dependency
+and may not be found when linking.
+
+Signed-off-by: Michael Olbrich <m.olbrich@pengutronix.de>
+---
+ tools/assistant/lib/lib.pro |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+Index: qt-everywhere-opensource-src-4.7.2/tools/assistant/lib/lib.pro
+===================================================================
+--- qt-everywhere-opensource-src-4.7.2.orig/tools/assistant/lib/lib.pro
++++ qt-everywhere-opensource-src-4.7.2/tools/assistant/lib/lib.pro
+@@ -23,6 +23,7 @@ unix:QMAKE_PKGCONFIG_REQUIRES += QtNetwo
+     QtSql \
+     QtXml
+ LIBS_PRIVATE += -l$$qclucene
++LIBS += -l$$qclucene
+ RESOURCES += helpsystem.qrc
+ SOURCES += qhelpenginecore.cpp \
+     qhelpengine.cpp \

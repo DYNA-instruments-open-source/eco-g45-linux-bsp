@@ -1,0 +1,3 @@
+classpath-0.98-cross-compile-qt.patch
+classpath-0.98-remove-qtembeddedwindow.patch
+classpath-0.98-add-qt-qws-support.patch

@@ -1,0 +1,16 @@
+Index: ltp-full-20100430/Makefile
+===================================================================
+--- ltp-full-20100430.orig/Makefile	2010-04-01 08:23:08.000000000 +0200
++++ ltp-full-20100430/Makefile	2011-08-05 18:26:55.308111000 +0200
+@@ -68,7 +68,10 @@
+ endif
+ endef
+ 
+-COMMON_TARGETS		+= testcases tools
++ifdef LTP_TESTCASES
++COMMON_TARGETS		+= testcases
++endif
++COMMON_TARGETS		+= tools
+ # Don't want to nuke the original files if we're installing in-build-tree.
+ ifneq ($(BUILD_TREE_STATE),$(BUILD_TREE_SRCDIR_INSTALL))
+ INSTALL_TARGETS		+= runtest testscripts

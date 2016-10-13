@@ -1,0 +1,81 @@
+## SECTION=shell_and_console
+
+menuconfig TRIGGERHAPPY
+ tristate
+ prompt "triggerhappy "
+ select BUSYBOX_START_STOP_DAEMON if TRIGGERHAPPY_STARTSCRIPT
+ select BUSYBOX_FEATURE_START_STOP_DAEMON_FANCY if TRIGGERHAPPY_STARTSCRIPT
+ help
+ thd - triggerhappy global hotkey daemon
+
+ Triggerhappy is a hotkey daemon developed with small and embedded
+ systems in mind, e.g. linux based routers. It attaches to the input
+ device files and interprets the event data received and executes
+ scripts configured in its configuration.
+
+if TRIGGERHAPPY
+
+config TRIGGERHAPPY_STARTSCRIPT
+ bool
+ default y
+ depends on TRIGGERHAPPY
+ select TRIGGERHAPPY_INSTALL_CONFIG
+ prompt "install /etc/init.d/triggerhappy"
+
+config TRIGGERHAPPY_INSTALL_CONFIG
+ bool
+ default y
+ prompt "install trigger config"
+
+
+if TRIGGERHAPPY_INSTALL_CONFIG
+
+config TRIGGERHAPPY_TRIGGERS
+ string
+ default "/etc/triggerhappy/triggers.d/" if TRIGGERHAPPY_TRIGGERS_DIR
+ default "/etc/triggerhappy.conf" if TRIGGERHAPPY_TRIGGERS_FILE
+ help
+ Read trigger definitions from <conf>, which can either be a file or
+ a directory. If a directory is specified, all its files matching the
+ pattern *.conf are loaded.
+ Create this file or directory with files in projectroot.
+ default dir: "/etc/triggerhappy/triggers.d/"
+ default file: "/etc/triggerhappy.conf"
+
+choice
+ prompt "trigger definitions place"
+ default TRIGGERHAPPY_TRIGGERS_DIR
+ config TRIGGERHAPPY_TRIGGERS_DIR
+ bool
+ prompt "/etc/triggerhappy/triggers.d/"
+ config TRIGGERHAPPY_TRIGGERS_FILE
+ bool
+ prompt "/etc/triggerhappy.conf"
+endchoice
+
+endif
+
+
+if TRIGGERHAPPY_STARTSCRIPT
+
+config TRIGGERHAPPY_USER
+ string
+ prompt "Change to user id <user> after opening files"
+ default "root"
+ help
+ Change to user id <user> after opening files. This usually prevents
+ thd from opening additional input devices, unless they are opened
+ by the th-cmd program and their file descriptor are passed to the
+ daemon or unless running as root.
+
+config TRIGGERHAPPY_INPUT_DEV
+ string
+ prompt "input device(s) to watch"
+ default "/dev/input/event*"
+ help
+ Name or pattern of input devices to watch.
+ Default: "/dev/input/event*" to watch all.
+
+endif
+
+endif

@@ -1,0 +1,530 @@
+--- /dev/null
++++ b/arch/arm/mach-at91/board-dynavel-hwrev22-can-sja1000.c
+@@ -0,0 +1,413 @@
++/*
++ * board-dynavel-hwrev22-can-sja1000.c
++ *
++ *  Created on: 18.11.2014
++ *      Author: lode
++ */
++
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/irqnr.h>
++#include <linux/gpio.h>
++#include <linux/can/platform/sja1000.h>
++#include <mach/at91sam9_smc.h>
++
++#include "board.h"
++#include "sam9_smc.h"
++#include "generic.h"
++#include "clock.h"
++
++#ifdef ECLIPSE_EDITOR
++#define __init
++#define __exit
++#define IS_ENABLED(x) (1)
++#define KERN_ERR
++#endif
++
++/*
++ * CAN-Controller NXP SJA1000
++ */
++
++// Module parameter
++static int chip_select = 5;
++static int irq_pin = AT91_PIN_PD7;
++static int mck_pin = AT91_PIN_PD12;
++
++// local variables
++static struct clk *pck = 0;
++
++static struct resource can_resources[] = {
++  [0] = {
++    .start   = AT91_CHIPSELECT_5,
++    .end     = AT91_CHIPSELECT_5 + 0xFF,
++    .flags   = IORESOURCE_MEM,
++  },
++  [1] = {
++    .start   = AT91_PIN_PD7,
++    .end     = AT91_PIN_PD7,
++    .flags   = IORESOURCE_IRQ | IORESOURCE_IRQ_SHAREABLE,
++  },
++};
++
++static struct sja1000_platform_data sja1000_data = {
++  .osc_freq = 8000000,    /* CAN controller oscillator frequency in Hz */
++  .ocr = OCR_MODE_NORMAL | OCR_TX0_PUSHPULL, // TX1 off
++//  .ocr = OCR_MODE_CLOCK | OCR_TX0_PUSHPULL | OCR_TX1_PUSHPULL,  // Bit clock output on TX1
++  .cdr = CDR_CBP | CDR_CLK_OFF, // Clockout is off
++//  .cdr = CDR_CBP | CDR_CLKOUT_MASK, // Clockout at fOSC
++};
++
++static struct platform_device can_device = {
++  .name           = "sja1000_platform",
++  .id             = 0,
++  .dev            = {
++    .platform_data  = &sja1000_data,
++  },
++  .resource       = can_resources,
++  .num_resources  = ARRAY_SIZE(can_resources),
++};
++
++static struct sam9_smc_config __initdata can_smc_config = {
++  .ncs_read_setup   = 2,
++  .nrd_setup        = 2,
++  .ncs_read_pulse   = 12,
++  .nrd_pulse        = 12,
++  .read_cycle       = 15,
++
++  .ncs_write_setup  = 2,
++  .nwe_setup        = 2,
++  .ncs_write_pulse  = 9,
++  .nwe_pulse        = 9,
++  .write_cycle      = 12,
++
++  .tdf_cycles       = 2,
++
++  .mode = AT91_SMC_READMODE | AT91_SMC_WRITEMODE | AT91_SMC_DBW_8 | AT91_SMC_TDFMODE,
++};
++
++static int __init check_chipselect(void)
++{
++  int ret = 0;
++
++  switch(chip_select)
++  {
++//  case 0:
++//    can_resources[0].start = AT91_CHIPSELECT_0;
++//    can_resources[0].end   = AT91_CHIPSELECT_0 + 0xFF;
++//    break;
++//  case 1:
++//    can_resources[0].start = AT91_CHIPSELECT_1;
++//    can_resources[0].end   = AT91_CHIPSELECT_1 + 0xFF;
++//    break;
++  case 2:
++    can_resources[0].start = AT91_CHIPSELECT_2;
++    can_resources[0].end   = AT91_CHIPSELECT_2 + 0xFF;
++    break;
++//  case 3:
++//    can_resources[0].start = AT91_CHIPSELECT_3;
++//    can_resources[0].end   = AT91_CHIPSELECT_3 + 0xFF;
++//    break;
++  case 4:
++    can_resources[0].start = AT91_CHIPSELECT_4;
++    can_resources[0].end   = AT91_CHIPSELECT_4 + 0xFF;
++    break;
++  case 5:
++    can_resources[0].start = AT91_CHIPSELECT_5;
++    can_resources[0].end   = AT91_CHIPSELECT_5 + 0xFF;
++    break;
++//  case 6:
++//    can_resources[0].start = AT91_CHIPSELECT_6;
++//    can_resources[0].end   = AT91_CHIPSELECT_6 + 0xFF;
++//    break;
++//  case 7:
++//    can_resources[0].start = AT91_CHIPSELECT_7;
++//    can_resources[0].end   = AT91_CHIPSELECT_7 + 0xFF;
++//    break;
++  default:
++    ret = -ENXIO;
++    break;
++  }
++
++  return ret;
++}
++
++static int __init allocate_pck0(void)
++{
++  int ret = 0;
++  struct clk *mck = 0;
++
++  do {
++    pck = clk_get_sys(can_device.name, "pck0");
++    if (IS_ERR(pck)) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to get PCK0\n");
++      ret = PTR_ERR(pck);
++      pck = 0;
++      break;
++    }
++
++    mck = clk_get(NULL, "mck");
++    if (IS_ERR(mck)) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to get MCK\n");
++      ret = PTR_ERR(mck);
++      break;
++    }
++
++    ret = clk_set_parent(pck, mck);
++    if (ret != 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to set PCK0 parent\n");
++      break;
++    }
++
++    ret = clk_set_rate(pck, mck->rate_hz);
++    if (ret < 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to set clock rate for PCK0\n");
++      break;
++    }
++
++    ret = clk_enable(pck);
++    if (ret != 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to enable PCK0\n");
++      break;
++    }
++
++  } while(0);
++
++  if (ret)
++  {
++    if (pck)
++      clk_put(pck);
++  }
++
++  if (mck)
++    clk_put(mck);
++
++  return ret;
++}
++
++static int __init allocate_pck1(void)
++{
++  int ret = 0;
++  struct clk *mck = 0;
++
++  do {
++    pck = clk_get_sys(can_device.name, "pck1");
++    if (IS_ERR(pck)) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to get PCK1\n");
++      ret = PTR_ERR(pck);
++      pck = 0;
++      break;
++    }
++
++    mck = clk_get(NULL, "mck");
++    if (IS_ERR(mck)) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to get MCK\n");
++      ret = PTR_ERR(mck);
++      break;
++    }
++
++    ret = clk_set_parent(pck, mck);
++    if (ret != 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to set PCK1 parent\n");
++      break;
++    }
++
++    ret = clk_set_rate(pck, mck->rate_hz);
++    if (ret < 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to set clock rate for PCK1\n");
++      break;
++    }
++
++    ret = clk_enable(pck);
++    if (ret != 0) {
++      printk(KERN_ERR "DYNAvel board SJA1000: Failed to enable PCK1\n");
++      break;
++    }
++
++  } while(0);
++
++  if (ret < 0)
++  {
++    if (pck)
++      clk_put(pck);
++  }
++  else
++    ret = 0;
++
++  if (mck)
++    clk_put(mck);
++
++  return ret;
++}
++
++static int __init check_mckpin(void)
++{
++  int ret = 0;
++
++  do {
++    if (!gpio_is_valid(mck_pin)) {
++      ret = -EINVAL;
++      break;
++    }
++
++    ret = gpio_request(mck_pin, can_device.name);
++
++    if (ret)
++      break;
++
++    ret = at91_set_multi_drive(mck_pin, 0);
++
++    if (ret)
++      break;
++
++    switch (mck_pin)
++    {
++    case AT91_PIN_PA31:
++    case AT91_PIN_PD12:
++    case AT91_PIN_PE0:
++      ret = at91_set_B_periph(mck_pin, 0);
++      if (ret)
++        break;
++      ret = allocate_pck0();
++      break;
++    case AT91_PIN_PD26:
++      ret = at91_set_A_periph(mck_pin, 0);
++      if (ret)
++        break;
++      ret = allocate_pck0();
++      break;
++    case AT91_PIN_PB31:
++    case AT91_PIN_PE31:
++      ret = at91_set_B_periph(mck_pin, 0);
++      if (ret)
++        break;
++      ret = allocate_pck1();
++      break;
++    case AT91_PIN_PD27:
++      ret = at91_set_A_periph(mck_pin, 0);
++      if (ret)
++        break;
++      ret = allocate_pck1();
++      break;
++    default:
++      ret = -ENXIO;
++      break;
++    }
++
++    if (ret) {
++      at91_set_GPIO_periph(mck_pin, 1);
++      gpio_free(mck_pin);
++      break;
++    }
++  } while (0);
++
++  return ret;
++}
++
++static void release_pck(void)
++{
++  clk_disable(pck);
++  clk_put(pck);
++  at91_set_GPIO_periph(mck_pin, 1);
++  gpio_free(mck_pin);
++}
++
++static void release(struct device *dev)
++{
++  release_pck();
++  at91_set_GPIO_periph(irq_pin, 1);
++  gpio_free(irq_pin);
++}
++
++static int __init board_rev22_can_init(void)
++{
++  int ret = 0;
++
++  do
++  {
++    ret = check_chipselect();
++    if (ret)
++      break;
++
++    ret = check_mckpin();
++    if (ret)
++      break;
++
++    do {
++      /* configure chip-select */
++      sam9_smc_configure(0, chip_select, &can_smc_config);
++
++      /* configure irq pin */
++      if (!gpio_is_valid(irq_pin)){
++        ret = -ENXIO;
++        break;
++      }
++
++      ret = gpio_request(irq_pin, can_device.name);
++      if (ret)
++        break;
++
++      do {
++        ret = at91_set_GPIO_periph(irq_pin, 1);
++        if (ret)
++          break;
++
++        ret = at91_set_gpio_input(irq_pin, 1);
++        if (ret)
++          break;
++
++        ret = at91_set_deglitch(irq_pin, 1);
++        if (ret)
++          break;
++
++        can_resources[1].start = can_resources[1].end = gpio_to_irq(irq_pin);
++        can_device.dev.release = release;
++        ret = platform_device_register(&can_device);
++      } while (0);
++
++      if (ret)
++        gpio_free(irq_pin);
++
++    } while (0);
++
++    if (ret)
++      release_pck();
++
++  } while (0);
++
++  return ret;
++}
++
++static void __exit board_rev22_can_exit(void)
++{
++  platform_device_unregister(&can_device);
++}
++
++
++module_param(mck_pin, int, 0444);
++MODULE_PARM_DESC(mck_pin, " IO pin where the MCK from the AT91 comes out for the bus bridge CPLD to the CAN controller, valid values: 63 (PB31), 108 (PD12, default), 122 (PD26), 123 (PD27), 160 (PE0), 191 (PE31)");
++
++module_param(irq_pin, int, 0444);
++MODULE_PARM_DESC(irq_pin, " IRQ input pin at the AT91, coming from the CAN controller, default 103 (PD7)");
++
++module_param(chip_select, int, 0444);
++MODULE_PARM_DESC(chip_select, " AT91 chip select to the CAN controller (selects base address), valid values: 2, 4, 5 (default)");
++
++module_param_named(osc_freq, sja1000_data.osc_freq, uint, 0444);
++MODULE_PARM_DESC(osc_freq, " Oscillator frequency of the CAN controller, default 8000000");
++
++module_param_named(ocr, sja1000_data.ocr, byte, 0444);
++MODULE_PARM_DESC(ocr, " OCR register value for the CAN controller");
++
++module_param_named(cdr, sja1000_data.cdr, byte, 0444);
++MODULE_PARM_DESC(cdr, " CDR register value for the CAN controller (PeliCAN is always enabled)");
++
++module_init(board_rev22_can_init);
++module_exit(board_rev22_can_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Johannes Lode <linuxer>@quantentunnel.de");
++MODULE_DESCRIPTION("Platform device module for the NXP SJA1000 CAN controller on the DYNAvel board Rev2.2.");
+--- a/drivers/net/can/sja1000/sja1000.c
++++ b/drivers/net/can/sja1000/sja1000.c
+@@ -261,7 +261,7 @@ static void chipset_init(struct net_devi
+ 	priv->write_reg(priv, SJA1000_ACCM2, 0xFF);
+ 	priv->write_reg(priv, SJA1000_ACCM3, 0xFF);
+ 
+-	priv->write_reg(priv, SJA1000_OCR, priv->ocr | OCR_MODE_NORMAL);
++	priv->write_reg(priv, SJA1000_OCR, priv->ocr);
+ }
+ 
+ /*
+--- a/include/linux/can/platform/sja1000.h
++++ b/include/linux/can/platform/sja1000.h
+@@ -4,7 +4,7 @@
+ /* clock divider register */
+ #define CDR_CLKOUT_MASK 0x07
+ #define CDR_CLK_OFF	0x08 /* Clock off (CLKOUT pin) */
+-#define CDR_RXINPEN	0x20 /* TX1 output is RX irq output */
++#define CDR_RXINTEN	0x20 /* TX1 output is RX irq output */
+ #define CDR_CBP		0x40 /* CAN input comparator bypass */
+ #define CDR_PELICAN	0x80 /* PeliCAN mode */
+ 
+--- a/arch/arm/mach-at91/Kconfig.non_dt
++++ b/arch/arm/mach-at91/Kconfig.non_dt
+@@ -367,6 +367,16 @@ config MACH_ECOG45_DYNAVEL21
+       
+       This enables support for OKI ML9620 CAN controller.
+ 
++config MACH_ECOG45_DYNAVEL22
++    tristate "DYNA Instruments GmbH DYNAvel board Rev 2.2"
++    depends on ARCH_AT91SAM9G45 && MACH_ECOG45 && !MACH_AT91SAM9M10G45EK && !MACH_ECOG45_EVAL
++    select CAN_SJA1000
++    select CAN_SJA1000_PLATFORM
++    help
++      Select this for the DYNA Instruments GmbH DYNAvel board Rev 2.2.
++
++      This enables support for NXP SJA1000 CAN controller.
++
+ endif
+ 
+ # ----------------------------------------------------------
+--- a/arch/arm/mach-at91/Makefile
++++ b/arch/arm/mach-at91/Makefile
+@@ -82,6 +82,7 @@ obj-$(CONFIG_MACH_SNAPPER_9260)	+= board
+ obj-$(CONFIG_MACH_AT91SAM9M10G45EK) += board-sam9m10g45ek.o
+ obj-$(CONFIG_MACH_AT91SAM9G45_CONFIG)	+= board-configfs-at91sam9g45.o
+ obj-$(CONFIG_MACH_ECOG45_DYNAVEL21)    += board-dynavel-hwrev21-can-oki9620.o
++obj-$(CONFIG_MACH_ECOG45_DYNAVEL22)    += board-dynavel-hwrev22-can-sja1000.o
+ obj-$(CONFIG_MACH_ECOG45)			+= board-eco-g45.o
+ obj-$(CONFIG_MACH_ECOG45_EVAL)		+= board-eco-g45.o board-eval-eco-g45.o
+ 
+--- a/arch/arm/mach-at91/clock.c
++++ b/arch/arm/mach-at91/clock.c
+@@ -104,6 +104,8 @@ EXPORT_SYMBOL_GPL(at91_pmc_base);
+ 				|| cpu_is_at91sam9n12() \
+ 				|| cpu_is_sama5d3())
+ 
++#define cpu_has_pck_master_mckflag() (cpu_is_at91sam9g45())
++
+ static LIST_HEAD(clocks);
+ static DEFINE_SPINLOCK(clk_lock);
+ 
+@@ -386,6 +388,8 @@ int clk_set_rate(struct clk *clk, unsign
+ 	} else {
+ 		prescale_offset = PMC_PRES_OFFSET;
+ 		css_mask = AT91_PMC_CSS;
++		if (cpu_has_pck_master_mckflag())
++		  css_mask |= AT91_PMC_CSSMCK_MCK;
+ 	}
+ 
+ 	spin_lock_irqsave(&clk_lock, flags);
+@@ -419,6 +423,7 @@ EXPORT_SYMBOL(clk_get_parent);
+ int clk_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	unsigned long	flags;
++  unsigned long css_mask;
+ 
+ 	if (clk->users)
+ 		return -EBUSY;
+@@ -428,11 +433,20 @@ int clk_set_parent(struct clk *clk, stru
+ 	if (cpu_is_at91sam9rl() && parent->id == AT91_PMC_CSS_PLLB)
+ 		return -EINVAL;
+ 
++  if (cpu_has_alt_prescaler()) {
++    css_mask = AT91_PMC_ALT_PCKR_CSS;
++  } else {
++    css_mask = AT91_PMC_CSS;
++  }
++
+ 	spin_lock_irqsave(&clk_lock, flags);
+ 
+ 	clk->rate_hz = parent->rate_hz;
+ 	clk->parent = parent;
+-	at91_pmc_write(AT91_PMC_PCKR(clk->id), parent->id);
++	if (cpu_has_pck_master_mckflag() && (AT91_PMC_CSS_MASTER == parent->id))
++	  at91_pmc_write(AT91_PMC_PCKR(clk->id), (parent->id & css_mask) | AT91_PMC_CSSMCK_MCK);
++	else
++	  at91_pmc_write(AT91_PMC_PCKR(clk->id), parent->id & css_mask);
+ 
+ 	spin_unlock_irqrestore(&clk_lock, flags);
+ 	return 0;
+@@ -842,10 +856,10 @@ static int __init at91_pmc_init(unsigned
+ 		mck.rate_hz = freq / (1 << ((mckr & AT91_PMC_MDIV) >> 8));		/* mdiv */
+ 	}
+ 
+-	if (cpu_has_alt_prescaler()) {
++	if (cpu_has_alt_prescaler() || cpu_has_pck_master_mckflag()) {
+ 		/* Programmable clocks can use MCK */
+ 		mck.type |= CLK_TYPE_PRIMARY;
+-		mck.id = 4;
++		mck.id = AT91_PMC_CSS_MASTER;
+ 	}
+ 
+ 	/* Register the PMC's standard clocks */

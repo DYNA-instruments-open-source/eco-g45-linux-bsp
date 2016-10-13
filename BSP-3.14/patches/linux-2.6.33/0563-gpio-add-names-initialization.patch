@@ -1,0 +1,122 @@
+Index: linux-2.6.33/arch/arm/mach-mx2/devices.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/devices.c
++++ linux-2.6.33/arch/arm/mach-mx2/devices.c
+@@ -39,6 +39,9 @@
+ 
+ #include "devices.h"
+ 
++/* GPIO names defined in the board file */
++extern char* mxc_gpio_names[];
++
+ /*
+  * SPI master controller
+  *
+@@ -612,27 +615,33 @@ struct platform_device imx_ssi_device1 =
+ static struct mxc_gpio_port imx_gpio_ports[] = {
+ 	{
+ 		.chip.label = "gpio-0",
++		.chip.names = mxc_gpio_names,
+ 		.irq = MXC_INT_GPIO,
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START,
+ 	}, {
+ 		.chip.label = "gpio-1",
++		.chip.names = &mxc_gpio_names[32 * 1],
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR + 0x100),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 32,
+ 	}, {
+ 		.chip.label = "gpio-2",
++		.chip.names = &mxc_gpio_names[32 * 2],
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR + 0x200),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 64,
+ 	}, {
+ 		.chip.label = "gpio-3",
++		.chip.names = &mxc_gpio_names[32 * 3],
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR + 0x300),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 96,
+ 	}, {
+ 		.chip.label = "gpio-4",
++		.chip.names = &mxc_gpio_names[32 * 4],
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR + 0x400),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 128,
+ 	}, {
+ 		.chip.label = "gpio-5",
++		.chip.names = &mxc_gpio_names[32 * 5],
+ 		.base = IO_ADDRESS(GPIO_BASE_ADDR + 0x500),
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 160,
+ 	}
+Index: linux-2.6.33/arch/arm/mach-mx25/devices.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx25/devices.c
++++ linux-2.6.33/arch/arm/mach-mx25/devices.c
+@@ -22,6 +22,9 @@
+ #include <mach/mx25.h>
+ #include <mach/irqs.h>
+ 
++/* GPIO names defined in the board file */
++extern char* mxc_gpio_names[];
++
+ static struct resource uart0[] = {
+ 	{
+ 		.start = 0x43f90000,
+@@ -429,21 +432,25 @@ struct platform_device imx_ssi_device1 =
+ static struct mxc_gpio_port imx_gpio_ports[] = {
+ 	{
+ 		.chip.label = "gpio-0",
++		.chip.names = mxc_gpio_names,
+ 		.base = (void __iomem *)MX25_GPIO1_BASE_ADDR_VIRT,
+ 		.irq = 52,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START,
+ 	}, {
+ 		.chip.label = "gpio-1",
++		.chip.names = &mxc_gpio_names[32 * 1],
+ 		.base = (void __iomem *)MX25_GPIO2_BASE_ADDR_VIRT,
+ 		.irq = 51,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 32,
+ 	}, {
+ 		.chip.label = "gpio-2",
++		.chip.names = &mxc_gpio_names[32 * 2],
+ 		.base = (void __iomem *)MX25_GPIO3_BASE_ADDR_VIRT,
+ 		.irq = 16,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 64,
+ 	}, {
+ 		.chip.label = "gpio-3",
++		.chip.names = &mxc_gpio_names[32 * 3],
+ 		.base = (void __iomem *)MX25_GPIO4_BASE_ADDR_VIRT,
+ 		.irq = 23,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 96,
+Index: linux-2.6.33/arch/arm/mach-mx3/devices.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/devices.c
++++ linux-2.6.33/arch/arm/mach-mx3/devices.c
+@@ -30,6 +30,9 @@
+ 
+ #include "devices.h"
+ 
++/* GPIO names defined in the board file */
++extern char* mxc_gpio_names[];
++
+ static struct resource uart0[] = {
+ 	{
+ 		.start = UART1_BASE_ADDR,
+@@ -131,16 +134,19 @@ struct platform_device mxc_uart_device4
+ static struct mxc_gpio_port imx_gpio_ports[] = {
+ 	{
+ 		.chip.label = "gpio-0",
++		.chip.names = mxc_gpio_names,
+ 		.base = IO_ADDRESS(GPIO1_BASE_ADDR),
+ 		.irq = MXC_INT_GPIO1,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START,
+ 	}, {
+ 		.chip.label = "gpio-1",
++		.chip.names = &mxc_gpio_names[32 * 1],
+ 		.base = IO_ADDRESS(GPIO2_BASE_ADDR),
+ 		.irq = MXC_INT_GPIO2,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 32,
+ 	}, {
+ 		.chip.label = "gpio-2",
++		.chip.names = &mxc_gpio_names[32 * 2],
+ 		.base = IO_ADDRESS(GPIO3_BASE_ADDR),
+ 		.irq = MXC_INT_GPIO3,
+ 		.virtual_irq_start = MXC_GPIO_IRQ_START + 64,

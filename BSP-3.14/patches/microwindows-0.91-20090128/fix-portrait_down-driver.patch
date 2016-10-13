@@ -1,0 +1,90 @@
+Index: microwindows-0.91-20090128/src/drivers/fbportrait_down.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fbportrait_down.c	2010-11-17 16:14:21.018615306 +0100
++++ microwindows-0.91-20090128/src/drivers/fbportrait_down.c	2010-11-17 16:17:20.930793000 +0100
+@@ -145,6 +145,73 @@
+ }
+ 
+ static void
++fbportrait32_drawarea_alphacol(PSD psd, driver_gc_t * gc)
++{
++	ADDR32 dst;
++	ADDR8 alpha;
++	unsigned long ps, pd;
++	int as;
++	long psr, psg, psb;
++	int x, y;
++	int src_row_step, dst_row_step;
++
++	alpha = ((ADDR8) gc->misc) + gc->src_linelen * gc->srcy + gc->srcx;
++	dst = ((ADDR32) psd->addr) + psd->linelen * (psd->yvirtres - gc->dsty -1) + (psd->xvirtres - gc->dstx -1);
++	ps = gc->fg_color;
++	psr = (long) (ps & 0x00FF0000UL);
++	psg = (long) (ps & 0x0000FF00UL);
++	psb = (long) (ps & 0x000000FFUL);
++
++	src_row_step = gc->src_linelen - gc->dstw;
++	dst_row_step = psd->linelen - gc->dstw;
++
++	DRAWON;
++	for (y = 0; y < gc->dsth; y++) {
++		for (x = 0; x < gc->dstw; x++) {
++			as = *alpha++;
++			if (as == 255) {
++				*dst-- = ps;
++			} else if (as != 0) {
++				/*
++				 * Scale alpha value from 255ths to 256ths
++				 * (In other words, if as >= 128, add 1 to it)
++				 *
++				 * Also flip the direction of alpha, so it's
++				 * backwards from it's usual meaning.
++				 * This is because the equation below is most
++				 * easily written with source and dest interchanged
++				 * (since we can split ps into it's components
++				 * before we enter the loop)
++				 */
++				as = 256 - (as + (as >> 7));
++				pd = *dst;
++
++				*dst-- = ((unsigned
++					   long) (((((long)
++						     (pd & 0x00FF0000UL) -
++						     psr) * as) >> 8) +
++						  psr) & 0x00FF0000UL)
++					|
++					((unsigned
++					  long) (((((long) (pd & 0x0000FF00UL)
++						    - psg) * as) >> 8) +
++						 psg) & 0x0000FF00UL)
++					|
++					((unsigned
++					  long) (((((long) (pd & 0x000000FFUL)
++						    - psb) * as) >> 8) +
++						 psb) & 0x000000FFUL);
++			} else {
++				dst--;
++			}
++		}
++		alpha += src_row_step;
++		dst -= dst_row_step;
++	}
++	DRAWOFF;
++}
++
++static void
+ fbportrait_drawarea(PSD dstpsd, driver_gc_t * gc, int op)
+ {
+ 	if (!dstpsd->orgsubdriver->DrawArea) {
+@@ -154,7 +221,11 @@
+ 	switch(op) {
+ #if MW_FEATURE_PSDOP_ALPHACOL
+ 	case PSDOP_ALPHACOL:
++  #if (MWPIXEL_FORMAT == MWPF_TRUECOLOR888) || (MWPIXEL_FORMAT == MWPF_TRUECOLOR0888)
++		fbportrait32_drawarea_alphacol(dstpsd, gc);
++  #else
+ 		fbportrait_drawarea_alphacol(dstpsd, gc);
++  #endif
+ 		break;
+ #endif /* MW_FEATURE_PSDOP_ALPHACOL */
+ 

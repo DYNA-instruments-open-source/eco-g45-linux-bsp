@@ -1,0 +1,4501 @@
+Index: microwindows-0.91-20090128/src/drivers/fblin16.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fblin16.c
++++ microwindows-0.91-20090128/src/drivers/fblin16.c
+@@ -6,7 +6,6 @@
+  *
+  * Inspired from Ben Pfaff's BOGL <pfaffben@debian.org>
+  */
+-/*#define NDEBUG*/
+ #include <assert.h>
+ #include <stdlib.h>
+ 
+@@ -19,7 +18,7 @@
+ #include "device.h"
+ #include "fb.h"
+ 
+-#define USE_16BIT_ACCESS 0	/* =1 to force 16 bit display access*/
++#define USE_16BIT_ACCESS 1	/* =1 to force 16 bit display access */
+ 
+ #if USE_16BIT_ACCESS
+ #define memcpy(d,s,nbytes)	memcpy16(d,s,(nbytes)>>1)
+@@ -229,7 +228,14 @@ stdblit:
+ 	} else {
+ 		while (--h >= 0) {
+ 			for (i=0; i<w; i++) {
+-				applyOp(MWROP_TO_MODE(op), *src, dst, ADDR16);
++                                if(op == MWROP_SRC_OVER)
++                                {
++                                  if(*src != 0xFFFF)
++                                    *dst = *src;
++                                }
++                                else
++				  applyOp(MWROP_TO_MODE(op), *src, dst, ADDR16);
++
+ 				++src;
+ 				++dst;
+ 			}
+@@ -300,7 +306,10 @@ if (g_col_inc) col_inc = g_col_inc; else
+ 				pixel = *src++;
+ 				col_pos -= 0x10000L;
+ 			}
+-			*dst++ = pixel;
++                        if((op == MWROP_SRC_OVER) && (pixel == 0xFFFF))
++			  dst++;
++                        else
++                          *dst++ = pixel;
+ 			col_pos += col_inc;
+ 		}
+ 
+@@ -521,6 +530,42 @@ linear16_stretchblitex(PSD dstpsd,
+ 		}
+ 		break;
+ 
++        case MWROP_SRC_OVER:
++		y_count = height;
++		while (y_count-- > 0) {
++			src_ptr = next_src_ptr;
++			dest_ptr = next_dest_ptr;
++
++			x_error = x_error_start;
++
++			x_count = width;
++			while (x_count-- > 0) {
++                          if((op == MWROP_SRC_OVER) && (*src_ptr == 0xFFFF))
++                                dest_ptr++;
++                          else
++				*dest_ptr++ = *src_ptr;
++
++				src_ptr += src_x_step_normal;
++				x_error += x_error_step_normal;
++
++				if (x_error >= 0) {
++					src_ptr += src_x_step_one;
++					x_error -= x_denominator;
++				}
++			}
++
++			next_dest_ptr += dest_y_step;
++
++			next_src_ptr += src_y_step_normal;
++			y_error += y_error_step_normal;
++
++			if (y_error >= 0) {
++				next_src_ptr += src_y_step_one;
++				y_error -= y_denominator;
++			}
++		}
++		break;
++
+ 	case MWROP_CLEAR:
+ 		y_count = height;
+ 		while (y_count-- > 0) {
+@@ -1227,8 +1272,7 @@ static void
+ linear16_drawarea_copyall(PSD psd, driver_gc_t * gc)
+ {
+ 	ADDR16 src16, dst;
+-	int linesize, x, y;
+-	unsigned short pcol;
++	int linesize, y;
+ 
+ 	linesize = 2 * gc->dstw;
+ 	src16 = ((ADDR16) gc->pixels) + gc->srcx + gc->src_linelen * gc->srcy;
+@@ -1248,7 +1292,7 @@ static void
+ linear16_drawarea_copytrans(PSD psd, driver_gc_t * gc)
+ {
+ 	ADDR16	src16, dst, rsrc, rdst;
+-	int linesize, x, y;
++	int x, y;
+ 	unsigned short pcol;
+ 
+ 	src16 = ((ADDR16) gc->pixels) + gc->srcx + gc->src_linelen * gc->srcy;
+Index: microwindows-0.91-20090128/src/drivers/fbportrait_left.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fbportrait_left.c
++++ microwindows-0.91-20090128/src/drivers/fbportrait_left.c
+@@ -70,9 +70,74 @@ fbportrait_stretchblit(PSD dstpsd, MWCOO
+ 	MWCOORD dsth, PSD srcpsd, MWCOORD srcx, MWCOORD srcy, MWCOORD srcw,
+ 	MWCOORD srch, long op)
+ {
+-	//dstpsd->orgsubdriver->StretchBlit(dstpsd, desty, dstpsd->xvirtres-destx-dstw,
+-		//dsth, dstw, srcpsd, srcy, srcpsd->xvirtres-srcx-srcw, 
+-		//srch, srcw, op);
++	dstpsd->orgsubdriver->StretchBlit(dstpsd, desty, dstpsd->xvirtres-destx-dstw,
++		dsth, dstw, srcpsd, srcy, srcpsd->xvirtres-srcx-srcw,
++		srch, srcw, op);
++}
++
++static void
++fbportrait_drawarea_alphacol(PSD dstpsd, driver_gc_t * gc)
++{
++  driver_gc_t l_gc;
++  ADDR8 alpha_in, alpha_out;
++  int in_x, in_y;
++  int in_w, in_h;
++  int out_x, out_y;
++  int out_w, out_h;
++
++  l_gc = *gc;
++  l_gc.dstx = gc->dsty;
++  l_gc.dsty = dstpsd->xvirtres - gc->dstx - gc->dstw;
++  l_gc.dstw = gc->dsth;
++  l_gc.dsth = gc->dstw;
++
++  l_gc.srcx = 0;
++  l_gc.srcy = 0;
++  l_gc.src_linelen = l_gc.dstw;
++  if (!(l_gc.misc = malloc(l_gc.dstw * l_gc.dsth))) {
++    return;
++  }
++
++  alpha_in = ((ADDR8) gc->misc) + gc->src_linelen * gc->srcy + gc->srcx;
++  in_w = gc->dstw;
++  in_h = gc->dsth;
++
++  alpha_out = l_gc.misc;
++  out_w = l_gc.dstw;
++  out_h = l_gc.dsth;
++
++  for (in_y = 0; in_y < in_h; in_y++) {
++    for (in_x = 0; in_x < in_w; in_x++) {
++      out_y = ((out_h - 1) - in_x);
++      out_x = in_y;
++
++      alpha_out[((out_y * out_w) + out_x)] = alpha_in[((in_y * in_w) + in_x)];
++    }
++  }
++
++  dstpsd->orgsubdriver->DrawArea(dstpsd, &l_gc, PSDOP_ALPHACOL);
++
++  free((void *)l_gc.misc);
++}
++
++static void
++fbportrait_drawarea(PSD dstpsd, driver_gc_t * gc, int op)
++{
++  if (!dstpsd->orgsubdriver->DrawArea) {
++    return;
++  }
++
++  switch(op) {
++#if MW_FEATURE_PSDOP_ALPHACOL
++  case PSDOP_ALPHACOL:
++    fbportrait_drawarea_alphacol(dstpsd, gc);
++    break;
++#endif /* MW_FEATURE_PSDOP_ALPHACOL */
++
++  default:
++    break;
++  }
++
+ }
+ 
+ SUBDRIVER fbportrait_left = {
+@@ -81,8 +146,9 @@ SUBDRIVER fbportrait_left = {
+ 	fbportrait_readpixel,
+ 	fbportrait_drawhorzline,
+ 	fbportrait_drawvertline,
+-	gen_fillrect,
++	fbportrait_fillrect,
+ 	fbportrait_blit,
+-	NULL,
+-	fbportrait_stretchblit
++	fbportrait_drawarea,
++	fbportrait_stretchblit,
++	NULL
+ };
+Index: microwindows-0.91-20090128/src/include/wingdi.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/wingdi.h
++++ microwindows-0.91-20090128/src/include/wingdi.h
+@@ -1,6 +1,6 @@
+ /* wingdi.h*/
+ /*
+- * Copyright (c) 1999,2000,2001 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999,2000,2001,2005 Greg Haerr <greg@censoft.com>
+  *
+  * Win32 GDI structures and API
+  */
+@@ -95,6 +95,7 @@ COLORREF WINAPI	SetTextColor(HDC, COLORR
+ COLORREF WINAPI	SetBkColor(HDC, COLORREF);
+ int WINAPI 	SetBkMode(HDC, int);
+ UINT WINAPI     SetTextAlign(HDC hdc, UINT fMode);
++UINT WINAPI     GetTextAlign(HDC hdc);
+ 
+ /* Binary raster ops*/
+ #define R2_BLACK            (MWMODE_CLEAR+1)		/*  0       */
+@@ -138,18 +139,24 @@ BOOL WINAPI	Pie(HDC hdc, int nLeftRect,
+ 			int nXRadial2, int nYRadial2);
+ BOOL WINAPI	Polygon(HDC hdc, CONST POINT *lpPoints, int nCount);
+ int WINAPI	FillRect(HDC hDC, CONST RECT *lprc, HBRUSH hbr);
++BOOL WINAPI	DrawFocusRect(HDC hdc, LPRECT prect);
+ 
+ /* ExTextOut options*/
+ #define ETO_OPAQUE	0x0002
+ #define ETO_CLIPPED	0x0004		/* nyi*/
+ 
+ BOOL WINAPI	TextOut(HDC hdc, int x, int y, LPCSTR lpszString, int cbString);
++BOOL WINAPI	TextOutW(HDC hdc, int x, int y, LPCWSTR lpszString, int cbString);
+ BOOL WINAPI	ExtTextOut(HDC hdc, int x, int y, UINT fuOptions,
+ 			CONST RECT *lprc, LPCSTR lpszString, UINT cbCount,
+ 			CONST INT *lpDx);
+ BOOL WINAPI	ExtTextOutW(HDC hdc, int x, int y, UINT fuOptions,
+ 			CONST RECT *lprc, LPCWSTR lpszString, UINT cbCount,
+ 			CONST INT *lpDx);
++LONG WINAPI TabbedTextOut ( HDC hdc, int x, int y, LPCTSTR lpszString, int cbString,
++            int ntabs, LPINT lpTabStops, int nTabOrigin );
++DWORD WINAPI GetTabbedTextExtent ( HDC hdc, int x, int y, LPCTSTR lpszString, int cbString,
++            int ntabs, LPINT lpTabStops );
+ 
+ /* DrawText options*/
+ #define DT_TOP              0x00000000
+Index: microwindows-0.91-20090128/src/mwin/winuser.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winuser.c
++++ microwindows-0.91-20090128/src/mwin/winuser.c
+@@ -1,7 +1,18 @@
+ /*
+- * Copyright (c) 1999 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999, 2005 Greg Haerr <greg@censoft.com>
+  *
+  * Win32 API upper level window creation, management and msg routines
++ *
++ * Modifications:
++ *  Date        Author                  Description
++ *  2003/09/01  Gabriele Brugnoni       Implemented multiple timers support
++ *  2003/09/22  Gabriele Brugnoni       InvalidateRect adds NC-Area only when needed.
++ *  2003/09/22  Gabriele Brugnoni       Implemented bErase for Invalidate functions.
++ *  2003/09/24  Gabriele Brugnoni       Fixed WM_ACTIVATE msg sent in SetFocus
++ *                                      (was sent active and inactive twice at new focused win)
++ *  2003/09/24  Gabriele Brugnoni       WA_ACTIVE with WA_INACTIVE is sent before changing
++ *                                      the pointer focus variable.
++ *  2003/09/24  Gabriele Brugnoni       Implemented WM_SYSCHAR for ALT-Key
+  */
+ #include "windows.h"
+ #include "wintern.h"
+@@ -30,7 +41,18 @@ int	mwpaintSerial = 1;		/* experimental
+ int	mwpaintNC = 1;			/* experimental NC paint handling*/
+ BOOL 	mwforceNCpaint = FALSE;		/* force NC paint when alpha blending*/
+ 
++struct timer {			/* private timer structure*/
++	HWND	hwnd;		/* window associated with timer, NULL if none*/
++	UINT	idTimer;	/* id for timer*/
++	UINT	uTimeout;	/* timeout value, in msecs*/
++	DWORD	dwClockExpires;	/* GetTickCount timer expiration value*/
++	TIMERPROC lpTimerFunc;	/* callback function*/
++	struct timer *next;
++};
++static struct timer *timerList = NULL;	/* global timer list*/
++
+ static void MwOffsetChildren(HWND hwnd, int offx, int offy);
++static void MwRemoveWndFromTimers(HWND hwnd);
+ 
+ LRESULT WINAPI
+ CallWindowProc(WNDPROC lpPrevWndFunc, HWND hwnd, UINT Msg, WPARAM wParam,
+@@ -42,9 +64,9 @@ CallWindowProc(WNDPROC lpPrevWndFunc, HW
+ LRESULT WINAPI
+ SendMessage(HWND hwnd, UINT Msg,WPARAM wParam,LPARAM lParam)
+ {
+-	if(hwnd && hwnd->pClass) {
++	if(IsWindow(hwnd) && hwnd->lpfnWndProc) {
+ 		hwnd->paintSerial = mwpaintSerial; /* assign msg sequence #*/
+-		return (*hwnd->pClass->lpfnWndProc)(hwnd, Msg, wParam, lParam);
++		return (*hwnd->lpfnWndProc)(hwnd, Msg, wParam, lParam);
+ 	}
+ 	return 0;
+ }
+@@ -129,7 +151,7 @@ chkPaintMsg(HWND wp, LPMSG lpMsg)
+ 			/* All other windows we'll check for
+ 			 * event input first, then allow repaint.
+ 			 */
+-			MwSelect();
++			MwSelect(FALSE);
+ 			if(mwMsgHead.head == NULL)
+ 				goto paint;
+ 		}
+@@ -160,7 +182,7 @@ PeekMessage(LPMSG lpMsg, HWND hwnd, UINT
+ 			}
+ 		}
+ #endif
+-		MwSelect();
++		MwSelect(FALSE);
+ 	}
+ 
+ 	if(mwMsgHead.head == NULL)
+@@ -183,16 +205,36 @@ GetMessage(LPMSG lpMsg,HWND hwnd,UINT wM
+ 	 * so this code will work
+ 	 */
+ 	while(!PeekMessage(lpMsg, hwnd, wMsgFilterMin, wMsgFilterMax,PM_REMOVE))
++	    {
++		/* Call select to suspend process until user input or scheduled timer */
++		MwSelect(TRUE);
++	    MwHandleTimers();
++#ifdef MW_CALL_IDLE_HANDLER
++	    idle_handler ();
++#endif
+ 		continue;
++	    }
+ 	return lpMsg->message != WM_QUIT;
+ }
+ 
+ BOOL WINAPI
+ TranslateMessage(CONST MSG *lpMsg)
+ {
++	static BOOL bAltStatus;	/* store ALT status to send WM_SYSCHAR */
++
+ 	/* Creat the WM_CHAR on WM_KEYDOWN messages*/
+-	if(lpMsg && (lpMsg->message == WM_KEYDOWN))
+-		PostMessage(lpMsg->hwnd, WM_CHAR, lpMsg->wParam, lpMsg->lParam);
++   	/* if bit 24 in lParam is ON (control key), don't post WM_CHAR */
++	if(lpMsg && (lpMsg->message == WM_KEYDOWN || lpMsg->message == WM_KEYUP) &&
++		(lpMsg->wParam == VK_MENU) )
++		bAltStatus = (lpMsg->message == WM_KEYDOWN);
++
++	if(lpMsg && (lpMsg->message == WM_KEYDOWN) &&
++	   (!(lpMsg->lParam & (1<<24)) || bAltStatus) ) {
++		if( !bAltStatus )
++			PostMessage(lpMsg->hwnd, WM_CHAR, lpMsg->wParam, lpMsg->lParam);
++		else
++			PostMessage(lpMsg->hwnd, WM_SYSCHAR, lpMsg->wParam, lpMsg->lParam);
++	}
+ 	return FALSE;
+ }
+ 
+@@ -263,9 +305,13 @@ CreateWindowEx(DWORD dwExStyle, LPCSTR l
+ 	HWND		hwndOwner;
+ 	PWNDCLASS	pClass;
+ 	CREATESTRUCT	cs;
++	int			titLen;
+ 	static int	nextx = 20;
+ 	static int	nexty = 20;
+ 
++	/* WARNING: All modification made here should be reported
++	   on MwInitialize for the rootwp window */
++
+ 	pClass = MwFindClassByName(lpClassName);
+ 	if(!pClass)
+ 		return NULL;
+@@ -306,7 +352,12 @@ CreateWindowEx(DWORD dwExStyle, LPCSTR l
+ 	/* force all clipping on by default*/
+ 	dwStyle |= WS_CLIPSIBLINGS | WS_CLIPCHILDREN;
+ 
++	titLen = 0;
++	if( lpWindowName != NULL )
++		titLen = strlen ( lpWindowName );
++	if( titLen < 64 ) titLen = 64; /* old mw compatibility */
+ 	wp->pClass = pClass;
++	wp->lpfnWndProc = pClass->lpfnWndProc;
+ 	wp->style = dwStyle;
+ 	wp->exstyle = dwExStyle;
+ 	wp->parent = pwp;
+@@ -325,11 +376,23 @@ CreateWindowEx(DWORD dwExStyle, LPCSTR l
+ 	wp->unmapcount = pwp->unmapcount + 1;
+ 	wp->id = (int)hMenu;
+ 	wp->gotPaintMsg = PAINT_PAINTED;
+-	strzcpy(wp->szTitle, lpWindowName, sizeof(wp->szTitle));
++	wp->szTitle = (LPTSTR) malloc ( titLen+1 );
++	if( wp->szTitle == NULL ) {
++		free ( wp );
++		return NULL;
++	}
++	if( lpWindowName != NULL )
++		strcpy ( wp->szTitle, lpWindowName );
++	else
++		strcpy ( wp->szTitle, "" );
+ #if UPDATEREGIONS
+ 	wp->update = GdAllocRegion();
+ #endif
+ 	wp->nextrabytes = pClass->cbWndExtra;
++	wp->hInstance = hInstance;
++	wp->nEraseBkGnd = 1;
++	wp->paintBrush = NULL;
++	wp->paintPen = NULL;
+ 
+ 	/* calculate client area*/
+ 	MwCalcClientRect(wp);
+@@ -395,9 +458,15 @@ MwDestroyWindow(HWND hwnd,BOOL bSendMsg)
+ 		SendMessage(hwnd, WM_DESTROY, 0, 0L);
+ 
+ 	/*
++	 * Remove from timers
++	 */
++	MwRemoveWndFromTimers(hwnd);
++
++	/*
+ 	 * Disable all sendmessages to this window.
+ 	 */
+ 	wp->pClass = NULL;
++	wp->lpfnWndProc = NULL;
+ 
+ 	/*
+ 	 * Destroy all children, sending WM_DESTROY messages.
+@@ -450,7 +519,7 @@ MwDestroyWindow(HWND hwnd,BOOL bSendMsg)
+ 		if(pmsg->hwnd == wp) {
+ 			p = p->next;
+ 			GdListRemove(&mwMsgHead, &pmsg->link);
+-			GdItemFree(p);
++			GdItemFree(pmsg);
+ 		} else
+ 			p = p->next;
+ 	}
+@@ -471,6 +540,8 @@ MwDestroyWindow(HWND hwnd,BOOL bSendMsg)
+ 		wp->owndc = NULL;	/* force destroy with ReleaseDC*/
+ 		ReleaseDC(wp, hdc);
+ 	}
++
++	free ( wp->szTitle );
+ #if UPDATEREGIONS
+ 	GdDestroyRegion(wp->update);
+ #endif
+@@ -516,7 +587,6 @@ ShowWindow(HWND hwnd, int nCmdShow)
+ BOOL WINAPI
+ InvalidateRect(HWND hwnd, CONST RECT *lpRect, BOOL bErase)
+ {
+-	/* FIXME: handle bErase*/
+ 	if(!hwnd)
+ 		MwRedrawScreen();
+ 	else {
+@@ -524,20 +594,29 @@ InvalidateRect(HWND hwnd, CONST RECT *lp
+ 		RECT	rc;
+ 
+ 		/* add to update region*/
+-		if(!lpRect)
++		if(!lpRect) {
+ 			GetClientRect(hwnd, &rc);
+-		else rc = *lpRect;
+-		rc.bottom += mwSYSMETRICS_CYCAPTION +
+-			mwSYSMETRICS_CYFRAME + 1;
++			if( hwnd->style & WS_CAPTION )
++				rc.bottom += mwSYSMETRICS_CYCAPTION;
++			if( (hwnd->style & (WS_BORDER | WS_DLGFRAME)) != 0 ) {
++				rc.bottom += mwSYSMETRICS_CYFRAME + 1;
+ 		rc.right += mwSYSMETRICS_CXFRAME;
++			}
++		}
++		else
++			rc = *lpRect;
++
+ 		MwUnionUpdateRegion(hwnd, rc.left, rc.top,
+ 			rc.right-rc.left, rc.bottom-rc.top, TRUE);
+ 
+ 		/* if update region not empty, mark as needing painting*/
+ 		if(hwnd->update->numRects != 0)
+ #endif
++
+ 			if(hwnd->gotPaintMsg == PAINT_PAINTED)
+ 				hwnd->gotPaintMsg = PAINT_NEEDSPAINT;
++		if( bErase )
++			hwnd->nEraseBkGnd++;
+ 	}
+ 	return TRUE;
+ }
+@@ -547,7 +626,6 @@ InvalidateRect(HWND hwnd, CONST RECT *lp
+ BOOL WINAPI
+ InvalidateRgn(HWND hwnd, HRGN hrgn, BOOL bErase)
+ {
+-	/* FIXME: handle bErase*/
+ 	if(hwnd) {
+ 		if(!hrgn)
+ 			/* add client area to update region*/
+@@ -565,6 +643,8 @@ InvalidateRgn(HWND hwnd, HRGN hrgn, BOOL
+ 		if(hwnd->update->numRects != 0)
+ 			if(hwnd->gotPaintMsg == PAINT_PAINTED)
+ 				hwnd->gotPaintMsg = PAINT_NEEDSPAINT;
++		if( bErase )
++			hwnd->nEraseBkGnd++;
+ 	}
+ 	return TRUE;
+ }
+@@ -578,12 +658,17 @@ ValidateRect(HWND hwnd, CONST RECT *lprc
+ 		MwRedrawScreen();
+ 	else {
+ 		/* subtract from update region*/
+-		if(!lprc)
++		if(!lprc) {
+ 			GetClientRect(hwnd, &rc);
+-		else rc = *lprc;
+-		rc.bottom += mwSYSMETRICS_CYCAPTION +
+-			mwSYSMETRICS_CYFRAME + 1;
++			if( hwnd->style & WS_CAPTION )
++				rc.bottom += mwSYSMETRICS_CYCAPTION;
++			if( (hwnd->style & (WS_BORDER | WS_DLGFRAME)) != 0 ) {
++				rc.bottom += mwSYSMETRICS_CYFRAME + 1;
+ 		rc.right += mwSYSMETRICS_CXFRAME;
++			}
++		} else
++			rc = *lprc;
++
+ 		MwUnionUpdateRegion(hwnd, rc.left, rc.top,
+ 			rc.right-rc.left, rc.bottom-rc.top, FALSE);
+ 
+@@ -658,17 +743,18 @@ SetFocus(HWND hwnd)
+ 		return focuswp;
+ 
+ 	oldfocus = focuswp;
++	top = MwGetTopWindow(oldfocus);
++	top2 = MwGetTopWindow(hwnd);
+ 	SendMessage(oldfocus, WM_KILLFOCUS, (WPARAM)hwnd, 0L);
++	/* send deactivate. Note: should be sent before changing the focuswp var*/
++	if(top2 != top)
++		SendMessage(top, WM_ACTIVATE, (WPARAM)MAKELONG(WA_INACTIVE, 0), (LPARAM)top2);
++
+ 	focuswp = hwnd;
+ 	SendMessage(focuswp, WM_SETFOCUS, (WPARAM)oldfocus, 0L);
+ 
+ 	/* FIXME SetActiveWindow() here?*/
+-	top = MwGetTopWindow(oldfocus);
+-	top2 = MwGetTopWindow(focuswp);
+ 	if(top2 != top) {
+-		/* send deactivate*/
+-		SendMessage(top, WM_ACTIVATE, (WPARAM)MAKELONG(WA_INACTIVE, 0),
+-			(LPARAM)top2);
+ 		/* repaint captions*/
+ 		MwPaintNCArea(top);
+ #if 0
+@@ -681,8 +767,8 @@ SetFocus(HWND hwnd)
+ 			top2->winrect.right-top2->winrect.left,
+ 			mwSYSMETRICS_CYCAPTION+4, TRUE);
+ #endif
+-		/* send deactivate*/
+-		SendMessage(top, WM_ACTIVATE, (WPARAM)MAKELONG(WA_ACTIVE, 0),
++		/* send activate*/
++		SendMessage(top2, WM_ACTIVATE, (WPARAM)MAKELONG(WA_ACTIVE, 0),
+ 			(LPARAM)top);
+ 		MwPaintNCArea(top2);
+ 	}
+@@ -739,7 +825,7 @@ GetDesktopWindow(VOID)
+ HWND
+ MwGetTopWindow(HWND hwnd)
+ {
+-	while(hwnd->style & WS_CHILD)
++	while(IsWindow(hwnd) && (hwnd->style & WS_CHILD))
+ 		hwnd = hwnd->parent;
+ 	return hwnd;
+ }
+@@ -956,10 +1042,9 @@ GetWindowLong(HWND hwnd, int nIndex)
+ {
+ 	switch(nIndex) {
+ 	case GWL_WNDPROC:
+-		return (LONG)hwnd->pClass->lpfnWndProc;
++		return (LONG)hwnd->lpfnWndProc;
+ 	case GWL_HINSTANCE:
+-		/* nyi*/
+-		break;
++		return (LONG)hwnd->hInstance;
+ 	case GWL_HWNDPARENT:
+ 		return (LONG)hwnd->parent;
+ 	case GWL_ID:
+@@ -971,8 +1056,18 @@ GetWindowLong(HWND hwnd, int nIndex)
+ 	case GWL_USERDATA:
+ 		return hwnd->userdata;
+ 	default:
++#ifdef ARCH_NEED_ALIGN32  /* some architecture needs data to be 32bit aligned*/
++		if(nIndex+3 < hwnd->nextrabytes) {
++			if(!(nIndex & 3))
++				return *(LONG *)&hwnd->extrabytes[nIndex];
++			return MAKELONG(
++				MAKEWORD(hwnd->extrabytes[nIndex+0], hwnd->extrabytes[nIndex+1]),
++				MAKEWORD(hwnd->extrabytes[nIndex+2], hwnd->extrabytes[nIndex+3]));
++		}
++#else
+ 		if(nIndex+3 < hwnd->nextrabytes)
+ 			return *(LONG *)&hwnd->extrabytes[nIndex];
++#endif
+ 	}
+ 	return 0;
+ }
+@@ -988,20 +1083,41 @@ SetWindowLong(HWND hwnd, int nIndex, LON
+ 		hwnd->userdata = lNewLong;
+ 		break;
+ 	case GWL_WNDPROC:
+-		oldval = (LONG)hwnd->pClass->lpfnWndProc;
+-		hwnd->pClass->lpfnWndProc = (WNDPROC)lNewLong;
++		oldval = (LONG)hwnd->lpfnWndProc;
++		hwnd->lpfnWndProc = (WNDPROC)lNewLong;
+ 		break;
+ 	case GWL_HINSTANCE:
+-	case GWL_HWNDPARENT:
+-	case GWL_ID:
++		oldval = (LONG)hwnd->hInstance;
++		hwnd->hInstance = (HINSTANCE) lNewLong;
++		break;
+ 	case GWL_STYLE:
++		oldval = (LONG)hwnd->style;
++		hwnd->style = lNewLong;
++		break;
+ 	case GWL_EXSTYLE:
++		oldval = (LONG)hwnd->exstyle;
++		hwnd->exstyle = lNewLong;
++		break;
++	case GWL_HWNDPARENT:
++	case GWL_ID:
+ 		/* nyi*/
+ 		break;
+ 	default:
+ 		if(nIndex+3 < hwnd->nextrabytes) {
++#ifdef ARCH_NEED_ALIGN32 /* some architecture needs data to be 32bit aligned*/
++			oldval = GetWindowLong(hwnd, nIndex);
++			if(!(nIndex & 3))
++			    *(LONG *)&hwnd->extrabytes[nIndex] = lNewLong;
++			else {
++			    hwnd->extrabytes[nIndex+0] = LOBYTE(LOWORD(lNewLong));
++			    hwnd->extrabytes[nIndex+1] = HIBYTE(LOWORD(lNewLong));
++			    hwnd->extrabytes[nIndex+2] = LOBYTE(HIWORD(lNewLong));
++			    hwnd->extrabytes[nIndex+3] = HIBYTE(HIWORD(lNewLong));
++			}
++#else
+ 			oldval = GetWindowLong(hwnd, nIndex);
+ 			*(LONG *)&hwnd->extrabytes[nIndex] = lNewLong;
++#endif
+ 		}
+ 		break;
+ 	}
+@@ -1170,6 +1286,7 @@ SetWindowPos(HWND hwnd, HWND hwndInsertA
+ 
+ 	++mwpaintSerial;	/* increment paint serial # for alphablending*/
+ 	++mwpaintNC;		/* increment paint serial # for NC painting*/
++	hwnd->nEraseBkGnd++;
+ 	if(!bZorder && !hidden)
+ 		MwShowWindow(hwnd, FALSE);
+ 
+@@ -1295,37 +1412,45 @@ ReleaseCapture(VOID)
+ 	return TRUE;
+ }
+ 
+-struct timer {			/* private timer structure*/
+-	HWND	hwnd;		/* window associated with timer, NULL if none*/
+-	UINT	idTimer;	/* id for timer*/
+-	UINT	uTimeout;	/* timeout value, in msecs*/
+-	DWORD	dwClockExpires;	/* GetTickCount timer expiration value*/
+-	TIMERPROC lpTimerFunc;	/* callback function*/
+-};
+-
+-static struct timer timer;	/* single global timer FIXME*/
+-
+ UINT WINAPI
+ SetTimer(HWND hwnd, UINT idTimer, UINT uTimeout, TIMERPROC lpTimerFunc)
+ {
++	struct timer *tm = (struct timer *) malloc ( sizeof(struct timer) );
+ 	static UINT nextID = 0;	/* next ID when hwnd is NULL*/
+ 
+ 	/* assign timer id based on valid window handle*/
+-	timer.hwnd = hwnd;
+-	timer.idTimer = hwnd? idTimer: ++nextID;
+-	timer.uTimeout = uTimeout;
+-	timer.dwClockExpires = GetTickCount() + uTimeout;
+-	timer.lpTimerFunc = lpTimerFunc;
++	if( tm == NULL )
++		return 0;
+ 
+-	return timer.idTimer;
++	tm->hwnd = hwnd;
++	tm->idTimer = hwnd? idTimer: ++nextID;
++	tm->uTimeout = uTimeout;
++	tm->dwClockExpires = GetTickCount() + uTimeout;
++	tm->lpTimerFunc = lpTimerFunc;
++	tm->next = timerList;
++	timerList = tm;
++
++	return tm->idTimer;
+ }
+ 
+ BOOL WINAPI
+ KillTimer(HWND hwnd, UINT idTimer)
+ {
+-	if(timer.hwnd == hwnd && timer.idTimer == idTimer) {
+-		timer.uTimeout = 0;
+-		return TRUE;
++	struct timer *tm = timerList;
++	struct timer *ltm = NULL;
++
++	while ( tm != NULL ) {
++		if( (tm->hwnd == hwnd) && (tm->idTimer == idTimer) ) {
++			if( ltm != NULL )
++				ltm->next = tm->next;
++			else
++				timerList = tm->next;
++
++			free ( tm );
++			return TRUE;
++		}
++		ltm = tm;
++		tm = tm->next;
+ 	}
+ 	return FALSE;
+ }
+@@ -1336,14 +1461,23 @@ KillTimer(HWND hwnd, UINT idTimer)
+ UINT
+ MwGetNextTimeoutValue(void)
+ {
++	int	bestTimeout = -1;
+ 	int	timeout;
++	struct timer *tm = timerList;
+ 
+-	if(timer.uTimeout) {
+-		timeout = timer.dwClockExpires - GetTickCount();
+-		if(timeout > 0)
+-			return timeout;
++	while ( tm != NULL ) {
++		timeout = tm->dwClockExpires - GetTickCount();
++		if( (timeout > 0) && ((timeout < bestTimeout) || (bestTimeout == -1)) )
++			bestTimeout = timeout;
++		else {
++			/*  If timer has expired, return zero*/
++			if (timeout <= 0)
++				return 0;
++		}
++		tm = tm->next;
+ 	}
+-	return 0;
++
++	return bestTimeout;
+ }
+ 
+ /*
+@@ -1352,26 +1486,39 @@ MwGetNextTimeoutValue(void)
+ void
+ MwHandleTimers(void)
+ {
+-	int	timeout;
+-	DWORD	dwTime;
++	DWORD	dwTime = 0;	/* should be system time in UTC*/
++	struct timer *tm = timerList;
+ 
+-	/* check if timer running*/
+-	if(timer.uTimeout == 0)
+-		return;
++	while ( tm != NULL ) {
++		if( GetTickCount() >= tm->dwClockExpires ) {
++			/* call timer function or post timer message*/
++			if( tm->lpTimerFunc )
++				tm->lpTimerFunc ( tm->hwnd, WM_TIMER, tm->idTimer, dwTime );
++			else
++				PostMessage ( tm->hwnd, WM_TIMER, tm->idTimer, 0 );
+ 
+-	/* determine if timer expired*/
+-	dwTime = GetTickCount();
+-	timeout = timer.dwClockExpires - dwTime;
+-	if(timeout > 0)
+-		return;
++			/* reset timer*/
++			tm->dwClockExpires = GetTickCount() + tm->uTimeout;
++		}
++		tm = tm->next;
++	}
++}
+ 
+-	/* call timer function or post timer message*/
+-	if(timer.lpTimerFunc)
+-		timer.lpTimerFunc(timer.hwnd, WM_TIMER, timer.idTimer, dwTime);
+-	else PostMessage(timer.hwnd, WM_TIMER, timer.idTimer, 0);
++/*
++ *  Check in timers list if hwnd is present and remove it.
++ */
++static void
++MwRemoveWndFromTimers(HWND hwnd)
++{
++	struct timer *next;
++	struct timer *tm = timerList;
+ 
+-	/* reset timer*/
+-	timer.dwClockExpires = dwTime + timer.uTimeout;
++	while ( tm != NULL ) {
++		next = tm->next;
++		if( tm->hwnd == hwnd )
++			KillTimer ( tm->hwnd, tm->idTimer );
++		tm = next;
++	}
+ }
+ 
+ int WINAPI
+@@ -1421,3 +1568,73 @@ GetDlgItem(HWND hDlg, int nIDDlgItem)
+ 	}
+ 	return 0;
+ }
++
++BOOL WINAPI
++EnumChildWindows(HWND hWndParent, WNDENUMPROC lpEnumFunc, LPARAM lParam)
++{
++	int	i;
++	HWND *	hchilds;
++	HWND	hwnd = hWndParent->children;
++	int	count = 0;
++
++	/*  Calculate the count of childs*/
++	while (hwnd) {
++		count++;
++		hwnd = hwnd->siblings;
++	}
++	if (!count)
++		return FALSE;
++
++	/* Allocate an array of pointer, to store childs in reverse order*/
++	hchilds = (HWND *)malloc(sizeof(HWND)*count);
++	if (hchilds == NULL)
++		return FALSE;
++
++	hwnd = hWndParent->children;
++	i = count;
++    	while (hwnd && (i > 0)) {
++		hchilds[--i] = hwnd;
++		hwnd = hwnd->siblings;
++	}
++
++	/* Call lpEnumFunc with correct children order*/
++	for (; i < count; i++)
++		if (!lpEnumFunc(hchilds[i], lParam))
++			break;
++	free (hchilds);
++	return TRUE;
++}
++
++int WINAPI
++GetClassName(HWND hWnd, LPTSTR lpClassName, int nMaxCount)
++{
++	int	ln = 0;
++
++	if (hWnd->pClass && hWnd->pClass->szClassName) {
++		ln = strlen(hWnd->pClass->szClassName);
++		if (ln > nMaxCount)
++			ln = nMaxCount;
++		strncpy(lpClassName, hWnd->pClass->szClassName, nMaxCount);
++	}
++	return ln;
++}
++
++short WINAPI
++GetKeyState(int nVirtKey)
++{
++  int currentbuttons;
++  short ret = 0;
++
++  currentbuttons = MwGetCurrentButtons();
++  if(nVirtKey == VK_LBUTTON)
++  {
++    if(currentbuttons & MWBUTTON_L)
++      ret = 0xFF00;
++  }
++  else if(nVirtKey == VK_RBUTTON)
++  {
++    if(currentbuttons & MWBUTTON_R)
++      ret = 0xFF00;
++  }
++  return ret;
++}
+Index: microwindows-0.91-20090128/src/include/winuser.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/winuser.h
++++ microwindows-0.91-20090128/src/include/winuser.h
+@@ -8,7 +8,7 @@
+ 
+ /* moved from windef.h for resource compiler*/
+ typedef LRESULT (CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+-typedef LRESULT (CALLBACK* DLGPROC)(HWND, UINT, WPARAM, LPARAM);
++typedef BOOL (CALLBACK* DLGPROC)(HWND, UINT, WPARAM, LPARAM);
+ 
+ /* win api*/
+ LRESULT WINAPI 	DefWindowProc(HWND hwnd,UINT msg,WPARAM wParam,LPARAM lParam);
+@@ -69,6 +69,7 @@ typedef struct tagMSG {
+ #define WM_NULL                         0x0000
+ #define WM_CREATE                       0x0001
+ #define WM_DESTROY                      0x0002
++#define WM_NCDESTROY			WM_DESTROY
+ #define WM_MOVE                         0x0003
+ #define WM_SIZE                         0x0005
+ #define WM_ACTIVATE                     0x0006
+@@ -83,6 +84,10 @@ typedef struct tagMSG {
+ #define WM_QUIT                         0x0012
+ #define WM_ERASEBKGND                   0x0014
+ #define WM_SHOWWINDOW                   0x0018
++#define WM_CTLCOLOR                     0x0019
++#define WM_NEXTDLGCTL                   0x0028
++#define WM_DRAWITEM                     0x002B
++#define WM_MEASUREITEM                  0x002C
+ #define WM_SETFONT          		0x0030
+ #define WM_GETFONT      		0x0031
+ #define WM_WINDOWPOSCHANGED             0x0047
+@@ -107,11 +112,22 @@ typedef struct tagMSG {
+ #define WM_SYSCHAR                      0x0106	/* nyi*/
+ #define WM_SYSDEADCHAR                  0x0107	/* notimp*/
+ #define WM_KEYLAST                      0x0108
++#define WM_INITDIALOG	                0x0110
+ #define WM_COMMAND                      0x0111
+ #define WM_TIMER                        0x0113
+ #define WM_HSCROLL                      0x0114
+ #define WM_VSCROLL                      0x0115
+ 
++#define WM_ENTERIDLE                    0x0121
++
++#define WM_CTLCOLORMSGBOX               0x0132
++#define WM_CTLCOLOREDIT                 0x0133
++#define WM_CTLCOLORLISTBOX              0x0134
++#define WM_CTLCOLORBTN                  0x0135
++#define WM_CTLCOLORDLG                  0x0136
++#define WM_CTLCOLORSCROLLBAR            0x0137
++#define WM_CTLCOLORSTATIC               0x0138
++
+ #define WM_MOUSEFIRST                   0x0200
+ #define WM_MOUSEMOVE                    0x0200
+ #define WM_LBUTTONDOWN                  0x0201
+@@ -502,3 +518,21 @@ BOOL WINAPI SetCaretPos(int nX, int nY);
+ BOOL WINAPI GetCaretPos(LPPOINT lpPoint);
+ UINT WINAPI GetCaretBlinkTime(VOID);
+ BOOL WINAPI SetCaretBlinkTime(UINT uMSeconds);
++
++
++int WINAPI GetClassName(HWND hWnd, LPTSTR lpClassName, int nMaxCount);
++HWND WINAPI GetNextDlgGroupItem(HWND hDlg, HWND hCtl, BOOL bPrevious);
++
++/*
++ *  Windows enumeration functions
++ */
++typedef BOOL CALLBACK (*WNDENUMPROC)(HWND, LPARAM);
++
++BOOL WINAPI EnumChildWindows(HWND hWndParent, WNDENUMPROC lpEnumFunc,
++			       LPARAM lParam);
++
++#ifdef MW_CALL_IDLE_HANDLER
++void WINAPI idle_handler(void);
++#endif
++
++short WINAPI GetKeyState(int nVirtKey);
+Index: microwindows-0.91-20090128/src/mwin/winevent.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winevent.c
++++ microwindows-0.91-20090128/src/mwin/winevent.c
+@@ -38,6 +38,9 @@ MwCheckMouseEvent(void)
+ 
+ 	/* Read the latest mouse status: */
+ 	mousestatus = GdReadMouse(&rootx, &rooty, &newbuttons);
++	/*
++	printf("M-Event: Status:%d, x:%d, y:%d, b:%d\n",mousestatus,rootx,rooty,newbuttons);
++	*/
+ 	if(mousestatus < 0) {
+ 		/*MwError(GR_ERROR_MOUSE_ERROR, 0);*/
+ 		return FALSE;
+@@ -181,6 +184,12 @@ MwTranslateMouseMessage(HWND hwnd,UINT m
+  */
+ int mwCurrentButtons;
+ 
++int
++MwGetCurrentButtons(void)
++{
++    return mwCurrentButtons;
++}
++
+ void 
+ MwDeliverMouseEvent(int buttons, int changebuttons, MWKEYMOD modifiers)
+ {
+Index: microwindows-0.91-20090128/src/include/wintern.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/wintern.h
++++ microwindows-0.91-20090128/src/include/wintern.h
+@@ -1,6 +1,6 @@
+ /* wintern.h*/
+ /*
+- * Copyright (c) 1999 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999, 2005 Greg Haerr <greg@censoft.com>
+  *
+  * Microwindows internal routines header file
+  */
+@@ -48,6 +48,8 @@ void		MwSetCursor(HWND wp, PMWCURSOR pcu
+ void		MwPaintNCArea(HWND hwnd);
+ HWND		MwPrepareDC(HDC hdc);
+ void		MwSetClipWindow(HDC hdc);
++void		MwSetTextCoding(long mode);
++BOOL		MwCheckUnderlineChar(HDC hdc, char *text, int *pLen, LPRECT rcLine);
+ 
+ /* winsbar.c*/
+ void		MwAdjustNCScrollbars(HWND hwnd);
+@@ -71,6 +73,7 @@ BOOL		MwCheckMouseEvent(void);
+ BOOL		MwCheckKeyboardEvent(void);
+ void 		MwHandleMouseStatus(MWCOORD newx, MWCOORD newy, int newbuttons);
+ void		MwTranslateMouseMessage(HWND hwnd,UINT msg,int hittest);
++int             MwGetCurrentButtons(void);
+ void		MwDeliverMouseEvent(int buttons, int changebuttons,
+ 			MWKEYMOD modifiers);
+ void		MwDeliverKeyboardEvent(MWKEY keyvalue, MWKEYMOD modifiers,
+@@ -100,11 +103,12 @@ extern int	mwSYSMETRICS_CYVSCROLL;
+ 
+ /* wingdi.c*/
+ extern BOOL	mwERASEMOVE;	/* default repaint algorithm*/
++extern long	mwTextCoding;	/* current text encoding*/
+ 
+ /* winmain.c*/
+ int		MwOpen(void);
+ void		MwClose(void);
+-void		MwSelect(void);
++void		MwSelect(BOOL mayWait);
+ int		MwInitialize(void);
+ void		MwTerminate(void);
+ extern	HWND	listwp;			/* list of all windows */
+Index: microwindows-0.91-20090128/src/engine/devimage.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devimage.c
++++ microwindows-0.91-20090128/src/engine/devimage.c
+@@ -537,5 +537,19 @@ void print_image(PMWIMAGEHDR image)
+ 		DPRINTF("imagebits: %d\n", image->imagebits[i]);
+ }
+ #endif
++/*
++ * Uwe Klatt 2006
++ * return preloaded image
++ */
++PMWIMAGEHDR GdGetImage(int id)
++{
++  PIMAGEITEM pItem;
++
++  pItem = findimage(id);
++  if(pItem)
++    return pItem->pimage;
++  else
++    return NULL;
++}
+ 
+ #endif /* MW_FEATURE_IMAGES - whole file */
+Index: microwindows-0.91-20090128/src/include/device.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/device.h
++++ microwindows-0.91-20090128/src/include/device.h
+@@ -12,7 +12,7 @@
+ #include "mwsystem.h"
+ 
+ /* Changeable limits and options*/
+-#define ALPHABLEND	1			/* =1 to include blending code*/
++#define ALPHABLEND	0			/* =1 to include blending code*/
+ #define DYNAMICREGIONS	1			/* =1 to use MWCLIPREGIONS*/
+ #define HAVEFLOAT	1			/* =1 incl float, GdArcAngle*/
+ #define POLYREGIONS	1			/* =1 includes polygon regions*/
+@@ -69,7 +69,7 @@
+ #endif /* MW_FEATURE_GDERROR*/
+ 
+ /* Which low-level psd->DrawArea routines to include. */
+-#define MW_FEATURE_PSDOP_COPY                   0
++#define MW_FEATURE_PSDOP_COPY                   1
+ #define MW_FEATURE_PSDOP_ALPHAMAP               0
+ #define MW_FEATURE_PSDOP_ALPHACOL               0
+ #define MW_FEATURE_PSDOP_BITMAP_BYTES_LSB_FIRST 0
+@@ -912,7 +912,7 @@ MWBOOL	GdGetImageInfo(int id, PMWIMAGEIN
+ void	GdStretchImage(PMWIMAGEHDR src, MWCLIPRECT *srcrect, PMWIMAGEHDR dst,
+ 		MWCLIPRECT *dstrect);
+ void	GdComputeImagePitch(int bpp, int width, int *pitch, int *bytesperpixel);
+-
++PMWIMAGEHDR GdGetImage(int id);
+ /* Buffered input functions to replace stdio functions*/
+ typedef struct {  /* structure for reading images from buffer   */
+ 	unsigned char *start;	/* The pointer to the beginning of the buffer */
+Index: microwindows-0.91-20090128/src/mwin/wingdi.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/wingdi.c
++++ microwindows-0.91-20090128/src/mwin/wingdi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 1999, 2000, 2001, 2002, 2003 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999, 2000, 2001, 2002, 2003, 2005 Greg Haerr <greg@censoft.com>
+  * Portions Copyright (c) 2002 by Koninklijke Philips Electronics N.V.
+  *
+  * Win32 API upper level graphics drawing routines
+@@ -7,6 +7,7 @@
+ #include "windows.h"
+ #include "wintern.h"
+ #include "device.h"
++#include "intl.h"
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -19,6 +20,9 @@ BOOL mwERASEMOVE = TRUE;	/* default XORM
+ BOOL mwERASEMOVE = FALSE;	/* default ERASEMOVE repaint algorithm*/
+ #endif
+ 
++/* current encoding for non-wide char text functions*/
++long mwTextCoding = MWTF_UTF8;	/* usually MWTF_ASCII or MWTF_UTF8*/
++
+ /* cast a pointer to an integer*/
+ #if DOS_TURBOC
+ #define PTRTOINT	unsigned long
+@@ -120,7 +124,7 @@ GetDC(HWND hwnd)
+ HDC WINAPI
+ GetWindowDC(HWND hwnd)
+ {
+-	/* 
++	/*
+ 	 * Exclude update region for now, since we
+ 	 * don't keep track of non-client update regions yet
+ 	 */
+@@ -128,7 +132,7 @@ GetWindowDC(HWND hwnd)
+ }
+ 
+ /* free a DC allocated from GetDC*/
+-int WINAPI 
++int WINAPI
+ ReleaseDC(HWND hwnd, HDC hdc)
+ {
+ 	/* don't delete a memory dc on release*/
+@@ -182,7 +186,7 @@ MwPaintNCArea(HWND hwnd)
+ 	MwPaintNCScrollbars(hwnd, NULL);
+ }
+ 
+-HDC WINAPI 
++HDC WINAPI
+ BeginPaint(HWND hwnd, LPPAINTSTRUCT lpPaint)
+ {
+ 	HDC	hdc;
+@@ -210,19 +214,42 @@ BeginPaint(HWND hwnd, LPPAINTSTRUCT lpPa
+ 		hdc = GetDCEx(hwnd, NULL, DCX_DEFAULTCLIP
+ 				|DCX_EXCLUDEUPDATE);	/* FIXME - bug*/
+ 
+-		/* erase client background*/
+-		lpPaint->fErase = !SendMessage(hwnd, WM_ERASEBKGND, (WPARAM)hdc,
+-			0L);
++		/* erase client background, always w/alpha blending*/
++		if(hwnd->nEraseBkGnd > 0 || mwforceNCpaint)
++			lpPaint->fErase = !SendMessage(hwnd, WM_ERASEBKGND, (WPARAM)hdc, 0L);
++		else
++			lpPaint->fErase = 0;
++
++		hwnd->nEraseBkGnd = 0;
+ 	}
+ 	lpPaint->hdc = hdc;
+ 
++	if( hwnd->paintBrush != NULL )
++		DeleteObject ( hwnd->paintBrush );
++	if( hwnd->paintPen != NULL )
++		DeleteObject ( hwnd->paintPen );
++	hwnd->paintBrush = NULL;
++	hwnd->paintPen = NULL;
++
+ 	GetUpdateRect(hwnd, &lpPaint->rcPaint, FALSE);
+ 	return hdc;
+ }
+ 
+-BOOL WINAPI 
++BOOL WINAPI
+ EndPaint(HWND hwnd, CONST PAINTSTRUCT *lpPaint)
+ {
++	if( hwnd->paintBrush != NULL )
++		{
++		SelectObject ( lpPaint->hdc, GetStockObject(NULL_BRUSH) );
++		DeleteObject ( hwnd->paintBrush );
++		hwnd->paintBrush = NULL;
++		}
++	if( hwnd->paintPen != NULL )
++		{
++		SelectObject ( lpPaint->hdc, GetStockObject(BLACK_PEN) );
++		DeleteObject ( hwnd->paintPen );
++		hwnd->paintPen = NULL;
++		}
+ 	ReleaseDC(hwnd, lpPaint->hdc);
+ #if UPDATEREGIONS
+ 	/* don't clear update region until done dragging*/
+@@ -281,6 +308,14 @@ SetTextAlign(HDC hdc, UINT fMode)
+ 	return oldfMode;
+ }
+ 
++UINT WINAPI
++GetTextAlign(HDC hdc)
++{
++  if(!hdc)
++    return GDI_ERROR;
++  return hdc->textalign;
++}
++
+ /* FIXME: releasing a DC does NOT change back the drawing mode!*/
+ int WINAPI
+ SetROP2(HDC hdc, int fnDrawMode)
+@@ -297,7 +332,7 @@ SetROP2(HDC hdc, int fnDrawMode)
+ 	return oldmode;
+ }
+ 
+-/* 
++/*
+  * Setup clip region from device context's associated window or bitmap.
+  * Memory DC's are always associated with the desktop window, and are
+  * always visible.  Return the DC's hwnd if window is visible.
+@@ -413,7 +448,7 @@ SetPixel(HDC hdc, int x, int y, COLORREF
+ 	return 0;		/* doesn't return previous color*/
+ }
+ 
+-BOOL WINAPI 
++BOOL WINAPI
+ MoveToEx(HDC hdc, int x, int y, LPPOINT lpPoint)
+ {
+ 	if(!hdc)
+@@ -497,13 +532,13 @@ Rectangle(HDC hdc, int nLeft, int nTop,
+ 	HWND	hwnd;
+ 	RECT	rc;
+ 
+-	hwnd = MwPrepareDC(hdc);
++        hwnd = MwPrepareDC(hdc);
+ 	if(!hwnd)
+ 		return FALSE;
+ 
+ 	SetRect(&rc, nLeft, nTop, nRight, nBottom);
+-	if(MwIsClientDC(hdc))
+-		MapWindowPoints(hwnd, NULL, (LPPOINT)&rc, 2);
++        if(MwIsClientDC(hdc))
++		MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc, 2);
+ 
+ 	/* draw rectangle in current pen color*/
+ 	if(hdc->pen->style != PS_NULL) {
+@@ -512,14 +547,13 @@ Rectangle(HDC hdc, int nLeft, int nTop,
+ 			rc.right - rc.left, rc.bottom - rc.top);
+ 	}
+ 
+-	/* fill rectangle in current brush color*/
++        /* fill rectangle in current brush color*/
+ 	if(hdc->brush->style != BS_NULL) {
+ 		InflateRect(&rc, -1, -1);
+ 		GdSetForegroundColor(hdc->psd, hdc->brush->color);
+ 		GdFillRect(hdc->psd, rc.left, rc.top, rc.right - rc.left,
+ 			rc.bottom - rc.top);
+ 	}
+-
+ 	return TRUE;
+ }
+ 
+@@ -536,7 +570,7 @@ Ellipse(HDC hdc, int nLeftRect, int nTop
+ 
+ 	SetRect(&rc, nLeftRect, nTopRect, nRightRect, nBottomRect);
+ 	if(MwIsClientDC(hdc))
+-		MapWindowPoints(hwnd, NULL, (LPPOINT)&rc, 2);
++		MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc, 2);
+ 
+ 	rx = (rc.right - rc.left)/2 - 1;
+ 	ry = (rc.bottom - rc.top)/2 - 1;
+@@ -574,8 +608,8 @@ dopiearc(HDC hdc, int nLeftRect, int nTo
+ 	SetRect(&rc, nLeftRect, nTopRect, nRightRect, nBottomRect);
+ 	SetRect(&rc2, ax, ay, bx, by);
+ 	if(MwIsClientDC(hdc)) {
+-		MapWindowPoints(hwnd, NULL, (LPPOINT)&rc, 2);
+-		MapWindowPoints(hwnd, NULL, (LPPOINT)&rc2, 2);
++		MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc, 2);
++		MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc2, 2);
+ 	}
+ 
+ 	rx = (rc.right - rc.left)/2 - 1;
+@@ -691,7 +725,7 @@ FillRect(HDC hdc, CONST RECT *lprc, HBRU
+ 	} else
+ 		rc = *lprc;
+ 	if(MwIsClientDC(hdc))
+-		MapWindowPoints(hwnd, NULL, (LPPOINT)&rc, 2);
++		MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc, 2);
+ 
+ 	/* handle COLOR_xxx + 1 passed as HBRUSH*/
+ 	if((PTRTOINT)obr <= MAXSYSCOLORS)
+@@ -710,22 +744,38 @@ FillRect(HDC hdc, CONST RECT *lprc, HBRU
+ 	return TRUE;
+ }
+ 
+-/* ascii*/
++
++/* set current input coding*/
++void WINAPI
++MwSetTextCoding(long mode)
++{
++	mwTextCoding = mode;
++}
++
++/* ascii or utf8 */
+ BOOL WINAPI
+ TextOut(HDC hdc, int x, int y, LPCSTR lpszString, int cbString)
+ {
+ 	/* kaffe port wants MWTF_UTF8 here...*/
+ 	return MwExtTextOut(hdc, x, y, 0, NULL, lpszString, cbString, NULL,
+-		MWTF_ASCII);
++		mwTextCoding);
++}
++
++/* UC16 */
++BOOL WINAPI
++TextOutW(HDC hdc, int x, int y, LPCWSTR lpszString, int cbString)
++{
++	/* kaffe port wants MWTF_UTF8 here...*/
++	return MwExtTextOut(hdc, x, y, 0, NULL, lpszString, cbString, NULL, MWTF_UC16 );
+ }
+ 
+-/* ascii*/
++/* ascii or utf8 */
+ BOOL WINAPI
+ ExtTextOut(HDC hdc, int x, int y, UINT fuOptions, CONST RECT *lprc,
+ 	LPCSTR lpszString, UINT cbCount, CONST INT *lpDx)
+ {
+ 	return MwExtTextOut(hdc, x, y, fuOptions, lprc, lpszString,
+-		cbCount, lpDx, MWTF_ASCII);
++		cbCount, lpDx, mwTextCoding);
+ }
+ 
+ /* unicode*/
+@@ -759,7 +809,7 @@ MwExtTextOut(HDC hdc, int x, int y, UINT
+ 	if(lprc && (fuOptions&ETO_OPAQUE)) {
+ 		rc = *lprc;
+ 		if(MwIsClientDC(hdc))
+-			MapWindowPoints(hwnd, NULL, (LPPOINT)&rc, 2);
++			MapWindowPoints(hwnd, NULL, (LPPOINT)(LPVOID)&rc, 2);
+ 
+ 		/* fill rectangle with current background color*/
+ 		GdSetForegroundColor(hdc->psd, hdc->bkcolor);
+@@ -788,35 +838,37 @@ MwExtTextOut(HDC hdc, int x, int y, UINT
+ 	GdSetForegroundColor(hdc->psd, hdc->textcolor);
+ 	GdSetFont(hdc->font->pfont);
+ 
+-	/* this whole text alignment thing needs rewriting*/
++	/* y-alignment is handled by device-driver... */
+ 	if((hdc->textalign & TA_BASELINE) == TA_BASELINE) {
+-		 /* this is not right... changed for kaffe port
+-		flags |= MWTF_TOP;
+-		 */
+ 		flags |= MWTF_BASELINE;
+ 	} else if(hdc->textalign & TA_BOTTOM) {
+-		MWCOORD	ph, pw, pb;
+-
+-		if(lprc)
+-			pt.y += lprc->bottom - lprc->top;
+-		else {
+-			GdGetTextSize(hdc->font->pfont, lpszString, cbCount,
+-				&pw, &ph, &pb, flags);
+-			pt.y += ph;
+-		}
+ 		flags |= MWTF_BOTTOM;
+ 	} else
+ 		flags |= MWTF_TOP;
+-	GdText(hdc->psd, pt.x, pt.y, lpszString, cbCount, flags);
+ 
++	/* x-alignment is handled here ;-) */
++        if((hdc->textalign & TA_CENTER) == TA_CENTER) {
++	    MWCOORD	ph, pw, pb;
++	    GdGetTextSize(hdc->font->pfont, lpszString, cbCount,
++		&pw, &ph, &pb, flags);
++	    pt.x -= pw/2;
++        }
++        else if(hdc->textalign & TA_RIGHT) {
++	    MWCOORD	ph, pw, pb;
++	    GdGetTextSize(hdc->font->pfont, lpszString, cbCount,
++		&pw, &ph, &pb, flags);
++	    pt.x -= pw;
++        }
++	GdText(hdc->psd, pt.x, pt.y, lpszString, cbCount, flags);
+ 	return TRUE;
+ }
+ 
+-/* ascii*/
++/* ascii or utf8 */
+ int WINAPI
+ DrawTextA(HDC hdc, LPCSTR lpString, int nCount, LPRECT lpRect, UINT uFormat)
+ {
+-	return MwDrawText(hdc, lpString, nCount, lpRect, uFormat, MWTF_ASCII);
++	return MwDrawText(hdc, lpString, nCount, lpRect, uFormat,
++		mwTextCoding);
+ }
+ 
+ /* unicode*/
+@@ -841,7 +893,7 @@ MwDrawText(HDC hdc, LPCVOID lpString, in
+ 		if(!hdc)
+ 			return 0;
+ 		GdGetTextSize(hdc->font->pfont, lpString, nCount,
+-			&width, &height, &baseline, MWTF_ASCII);
++			&width, &height, &baseline, flags);
+ 	}
+ 	x = lpRect->left;
+ 	y = lpRect->top;
+@@ -855,7 +907,15 @@ MwDrawText(HDC hdc, LPCVOID lpString, in
+ 	if(uFormat & DT_CENTER)
+ 		x = (lpRect->left + lpRect->right - width) / 2;
+ 	else if(uFormat & DT_RIGHT)
+-		x += lpRect->right - width;
++		x = lpRect->right - width;
++
++	if(uFormat & DT_VCENTER)
++	    y = lpRect->bottom / 2;
++
++	if(uFormat & DT_BOTTOM) {
++	    flags |= MWTF_BOTTOM;
++	    y = lpRect->bottom;
++	}
+ 
+ 	/* draw text at DT_TOP using current fg, bg and bkmode*/
+ 	MwExtTextOut(hdc, x, y, 0, NULL, lpString, nCount, NULL, flags);
+@@ -1035,15 +1095,15 @@ static MWFONTOBJ OBJ_DEFAULT_GUI_FONT =
+ };
+ 
+ static struct hgdiobj *stockObjects[MAXSTOCKOBJECTS] = {
+-	(struct hgdiobj *)&OBJ_WHITE_BRUSH,		/* WHITE_BRUSH*/
+-	(struct hgdiobj *)&OBJ_LTGRAY_BRUSH,		/* LTGRAY_BRUSH*/
+-	(struct hgdiobj *)&OBJ_GRAY_BRUSH,		/* GRAY_BRUSH*/
+-	(struct hgdiobj *)&OBJ_DKGRAY_BRUSH,		/* DKGRAY_BRUSH*/
+-	(struct hgdiobj *)&OBJ_BLACK_BRUSH,		/* BLACK_BRUSH*/
+-	(struct hgdiobj *)&OBJ_NULL_BRUSH,		/* NULL_BRUSH*/
+-	(struct hgdiobj *)&OBJ_WHITE_PEN,		/* WHITE_PEN*/
+-	(struct hgdiobj *)&OBJ_BLACK_PEN,		/* BLACK_PEN*/
+-	(struct hgdiobj *)&OBJ_NULL_PEN,		/* NULL_PEN*/
++	(struct hgdiobj *)(LPVOID)&OBJ_WHITE_BRUSH,		/* WHITE_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_LTGRAY_BRUSH,		/* LTGRAY_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_GRAY_BRUSH,		/* GRAY_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_DKGRAY_BRUSH,		/* DKGRAY_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_BLACK_BRUSH,		/* BLACK_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_NULL_BRUSH,		/* NULL_BRUSH*/
++	(struct hgdiobj *)(LPVOID)&OBJ_WHITE_PEN,		/* WHITE_PEN*/
++	(struct hgdiobj *)(LPVOID)&OBJ_BLACK_PEN,		/* BLACK_PEN*/
++	(struct hgdiobj *)(LPVOID)&OBJ_NULL_PEN,		/* NULL_PEN*/
+ 	(struct hgdiobj *)NULL,
+ 	(struct hgdiobj *)&OBJ_OEM_FIXED_FONT,		/* OEM_FIXED_FONT*/
+ 	(struct hgdiobj *)&OBJ_ANSI_FIXED_FONT,		/* ANSI_FIXED_FONT*/
+@@ -1186,7 +1246,7 @@ ExtSelectClipRgn(HDC hdc, HRGN hrgn, int
+ 		if(hrgn) {
+ 			newrgn = CreateRectRgn(0, 0, 0, 0);
+ 
+-			/* 
++			/*
+ 			 * Temporarily convert region from
+ 			 * client coords to screen coords, since
+ 			 * hwnd->update is kept in screen coords.
+@@ -1454,3 +1514,187 @@ GetDeviceCaps(HDC hdc, int nIndex)
+ 	}
+ 	return 0;
+ }
++
++/*
++ *  Draw a rectangle indicating focus
++ */
++BOOL WINAPI
++DrawFocusRect(HDC hdc, LPRECT prect)
++{
++	unsigned long dm = 0xAAAAAAAA;
++	int dc = 32;
++	int oldmode = GdSetMode(MWMODE_XOR);
++	HPEN holdpen = SelectObject(hdc,
++		CreatePen(PS_SOLID, 1, RGB(255, 255, 255)));
++
++	GdSetDash(&dm, &dc);
++	SelectObject(hdc, GetStockObject(NULL_BRUSH));
++	Rectangle(hdc, prect->left - 1, prect->top, prect->right + 1,
++		  prect->bottom);
++	GdSetDash(&dm, &dc);
++	DeleteObject(SelectObject(hdc, holdpen));
++	GdSetMode(oldmode);
++	return TRUE;
++}
++
++
++/* ascii or utf8 */
++static LONG
++mwTabbedTextOut(HDC hdc, int x, int y, LPCTSTR lpszString, int cbString,
++	int ntabs, LPINT lpTabStops, int nTabOrigin, BOOL noDraw)
++{
++	TEXTMETRIC tm;
++	int count;
++	int tot;
++	int xw, xh, xb;
++	int tabPos = x;
++	int deftab = 32;
++	int orgx = x;
++	LPTSTR szShaped;
++	LPCTSTR pstr;
++	LPINT pTab = lpTabStops;
++	unsigned long attrib = 0;
++
++	if (GetTextMetrics(hdc, &tm))
++		deftab = 8 * tm.tmAveCharWidth;
++
++	if (pTab == NULL)
++		ntabs = 0;
++
++	if (ntabs == 1) {
++		deftab = *pTab;
++		ntabs = 0;
++	}
++
++	if (cbString == -1)
++		cbString = strlen(lpszString);
++
++	/* Duplicate text. If coding is UTF-8, generate it by checking shape/joining*/
++	if (mwTextCoding == MWTF_UTF8)
++		szShaped = doCharShape_UTF8(lpszString, cbString, &cbString,
++					 &attrib);
++	else
++		szShaped = strdup(lpszString);
++
++	if (szShaped == NULL)
++		return 0;
++
++	pstr = szShaped;
++	tot = cbString;
++	GdSetFont(hdc->font->pfont);
++	while (tot > 0) {
++		for (count = 0; (count < tot) && (pstr[count] != '\t'); count++)
++		     continue;
++
++		GdGetTextSize(hdc->font->pfont, pstr, count, &xw, &xh, &xb,
++			      mwTextCoding);
++
++		while ((ntabs > 0) && (nTabOrigin + *pTab <= (x + xw))) {
++			pTab++;
++			ntabs--;
++		}
++
++		if (count == tot)
++			tabPos = x + xw;
++		else if (ntabs > 0)
++			tabPos = nTabOrigin + *pTab;
++		else
++			tabPos = nTabOrigin +
++				((x + xw - nTabOrigin) / deftab + 1) * deftab;
++
++		if (!noDraw) {
++			RECT rect;
++
++			rect.left = x;
++			rect.top = y;
++			rect.right = x + tabPos;
++			rect.bottom = y + xh;
++			//TextOut ( hdc, x, y, pstr, count );
++			if (attrib & TEXTIP_EXTENDED) {
++				LPSTR virtText = doCharBidi_UTF8(pstr, count,
++							NULL, NULL, &attrib);
++				if (virtText) {
++					if ((attrib & TEXTIP_RTOL))
++						DrawTextA(hdc, virtText,
++							  count, &rect,
++							  DT_RIGHT |
++							  DT_SINGLELINE |
++							  DT_TOP);
++					else
++						DrawTextA(hdc, virtText,
++							  count, &rect,
++							  DT_LEFT |
++							  DT_SINGLELINE |
++							  DT_TOP);
++					free(virtText);
++				}
++			} else
++				DrawTextA(hdc, pstr, count, &rect,
++					  DT_LEFT | DT_SINGLELINE | DT_TOP);
++		}
++
++		x = tabPos;
++		tot -= (count + 1);
++		pstr += (count + 1);
++	}
++
++	free(szShaped);
++	return MAKELONG((tabPos - orgx), xh);
++}
++
++
++/* ascii or utf8 */
++LONG WINAPI
++TabbedTextOut(HDC hdc, int x, int y, LPCTSTR lpszString, int cbString,
++	int ntabs, LPINT lpTabStops, int nTabOrigin)
++{
++	return mwTabbedTextOut(hdc, x, y, lpszString, cbString, ntabs,
++			       lpTabStops, nTabOrigin, FALSE);
++}
++
++
++DWORD WINAPI
++GetTabbedTextExtent(HDC hdc, int x, int y, LPCTSTR lpszString, int cbString,
++	int ntabs, LPINT lpTabStops)
++{
++	return mwTabbedTextOut(hdc, x, y, lpszString, cbString, ntabs,
++			       lpTabStops, 0, TRUE);
++}
++
++
++/*
++ *  Check in text for the '&' chr, remove it from text and sets rect for pos
++ */
++BOOL
++MwCheckUnderlineChar(HDC hdc, char *text, int *pLen, LPRECT rcLine)
++{
++	int i;
++	int txtlen;
++
++	if (pLen)
++		txtlen = *pLen;
++	else
++		txtlen = strlen(text);
++
++	for (i = 0; i < txtlen; i++) {
++		if ((text[i] == '&') && (i + 1 < txtlen)
++		    && (text[i + 1] != '&')) {
++			SIZE sz;
++			TEXTMETRIC tm;
++
++			GetTextMetrics(hdc, &tm);
++			GetTextExtentPoint(hdc, text, i, &sz);
++			rcLine->left = sz.cx;
++			rcLine->top = 0;
++			rcLine->bottom = tm.tmAscent + 1;
++			GetTextExtentPoint(hdc, text + i + 1, 1, &sz);
++			rcLine->right = rcLine->left + sz.cx;
++			memmove(text + i, text + i + 1, txtlen - i);
++			txtlen--;
++			if (pLen)
++				*pLen = txtlen;
++			return TRUE;
++		}
++	}
++	return FALSE;
++}
+Index: microwindows-0.91-20090128/src/mwin/winfont.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winfont.c
++++ microwindows-0.91-20090128/src/mwin/winfont.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2000, 2003 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 2000, 2003, 2005 Greg Haerr <greg@censoft.com>
+  * GetTextExtent*Point by Roman Guseynov
+  * Original contributions by Shane Nay
+  *
+@@ -114,7 +114,8 @@ CreateFontIndirect(CONST LOGFONT *lplf)
+ 	if (!hfont->pfont)
+ 		hfont->pfont = GdCreateFont(&scrdev, NULL, 0, NULL);
+ 
+-	return (HFONT)hfont;
++        GdSetFontAttr(hfont->pfont,MWTF_ANTIALIAS,0);
++        	return (HFONT)hfont;
+ }
+ 
+ BOOL WINAPI
+@@ -194,55 +195,58 @@ GetTextExtentPoint(
+ 	}
+ 	if (!hdc || !lpszStr || !cchString || !lpSize)
+ 		return FALSE;
++
+ 	GdGetTextSize(hdc->font->pfont, lpszStr, cchString, &width, &height,
+-		&baseline, MWTF_UTF8);
++		&baseline, mwTextCoding);
+ 	lpSize->cx = width;
+ 	lpSize->cy = height;
+ 
+-	/*printf("<MWIN>: lpszStr=\"%s\", cchString=%d, lpsize->cx=%d, lpSize->cy=%d\n", lpszStr, cchString, lpSize->cx, lpSize->cy);*/
++	/* EPRINTF("<MWIN>: lpszStr=\"%s\", cchString=%d, lpsize->cx=%d, lpSize->cy=%d\n", lpszStr, cchString, lpSize->cx, lpSize->cy); */
+ 	return TRUE;
+ }
+ 
+ BOOL WINAPI
+ GetTextExtentExPoint(HDC hdc,	/* handle to DC*/
+-	  LPCTSTR lpszStr,	/* character string*/
+-	  int cchString,	/* number of characters*/
+-	  int nMaxExtent,	/* maximum width of formatted string*/
+-	  LPINT lpnFit,		/* maximum number of characters*/
+-	  LPINT alpDx,	 	/* array of partial string widths*/
+-	  LPSIZE lpSize)	/* string dimensions*/
++	LPCTSTR lpszStr,	/* character string*/
++	int cchString,		/* number of characters*/
++	int nMaxExtent,		/* maximum width of formatted string*/
++	LPINT lpnFit,		/* maximum number of characters*/
++	LPINT alpDx,	 	/* array of partial string widths*/
++	LPSIZE lpSize)		/* string dimensions*/
+ 
+ {
+-	int attr,width=0,height=0;
++	int attr, width = 0,height = 0;
+ 
+ 	if(!hdc || !lpszStr)
+ 		return FALSE;
+-	if (cchString<0)
++
++	if (cchString < 0)
+ 		cchString = strlen((char *)lpszStr);
+-	attr=hdc->font->pfont->fontattr;
+-	if (attr&MWTF_FREETYPE)
+-	{ 
+-		if (GdGetTextSizeEx(hdc->font->pfont,lpszStr,cchString,
+-			nMaxExtent,lpnFit,alpDx,&width,&height,NULL,MWTF_UTF8))
+-		{
++
++	attr = hdc->font->pfont->fontattr;
++	if (attr&MWTF_FREETYPE) {
++		if (GdGetTextSizeEx(hdc->font->pfont, lpszStr, cchString,
++			nMaxExtent, lpnFit, alpDx, &width, &height, NULL,
++								mwTextCoding)) {
+ 			lpSize->cx=width;
+ 			lpSize->cy=height;
+ 			return TRUE;
+ 		}
+ 		return FALSE;
+-	}
+-	else
+-	{
+-		SIZE sz;
++	} else {
+ 		int i;
++		SIZE sz;
+ 
+ 		if (!GetTextExtentPoint(hdc, lpszStr, cchString, lpSize))
+ 			return FALSE;
+-		if ((!nMaxExtent)||(!lpnFit)||(!alpDx))
++
++		if (!nMaxExtent || !lpnFit || !alpDx)
+ 			return TRUE;
++
+ 		for (i=0; i<cchString; i++) {
+ 			if (!GetTextExtentPoint(hdc, lpszStr, i+1, &sz))
+ 				return FALSE;
++
+ 			if (sz.cx <= nMaxExtent)
+ 				alpDx[i] = sz.cx;
+ 			else {
+@@ -251,6 +255,92 @@ GetTextExtentExPoint(HDC hdc,	/* handle
+ 			}
+ 		}
+ 		(*lpnFit) = cchString;
+-		return TRUE;	
++		return TRUE;
+ 	}
+-}     
++}
++
++int WINAPI
++EnumFonts(
++	HDC hdc,		/* handle to DC */
++	LPCTSTR lpFaceName,	/* font typeface name */
++	FONTENUMPROC lpFontFunc,/* callback function */
++	LPARAM lParam) 		/* application-supplied data */
++{
++	int		i;
++	PSD		psd = &scrdev;
++	PMWCOREFONT	pf = psd->builtin_fonts;
++	LOGFONT		lf;
++	TEXTMETRIC	tm;
++	TEXTMETRIC	*lptm = &tm;
++	MWFONTINFO	fi;
++	MWSCREENINFO	scrinfo;
++	extern MWCOREFONT *user_builtin_fonts;
++
++	GdGetScreenInfo(psd, &scrinfo);
++	memset(&lf, 0, sizeof(lf));
++	GetTextMetrics(hdc, &tm);
++
++	for (i = 0;; ++i) {
++		if (i < scrinfo.fonts)
++			pf = psd->builtin_fonts + i;
++		else if (user_builtin_fonts == NULL)
++			break;
++		else
++			pf = user_builtin_fonts + (i - scrinfo.fonts);
++		if (pf->name == NULL)
++			break;
++
++		GdGetFontInfo((PMWFONT) pf, &fi);
++		lptm->tmHeight = fi.height;
++		lptm->tmDescent = fi.height - fi.baseline;
++		lptm->tmAscent = fi.baseline;
++		lptm->tmInternalLeading = 0;
++		lptm->tmExternalLeading = 0;
++		lptm->tmAveCharWidth = fi.widths['x'];
++		lptm->tmMaxCharWidth = fi.maxwidth;
++		lptm->tmWeight = FW_NORMAL;
++		lptm->tmOverhang = 0;
++		lptm->tmDigitizedAspectX = fi.maxwidth;
++		lptm->tmDigitizedAspectY = fi.height;
++		lptm->tmFirstChar = 32;
++		lptm->tmLastChar = 255;
++		lptm->tmDefaultChar = '?';
++		lptm->tmBreakChar = 0;
++		lptm->tmItalic = 0;
++		lptm->tmUnderlined = 0;
++		lptm->tmStruckOut = 0;
++		lptm->tmPitchAndFamily = fi.fixed ? FF_DONTCARE :
++			(FF_DONTCARE | TMPF_FIXED_PITCH);
++		lptm->tmCharSet = OEM_CHARSET;
++
++		strncpy(lf.lfFaceName, pf->name, sizeof(lf.lfFaceName));
++		lf.lfHeight = fi.height;
++		lf.lfWidth = fi.widths['x'];
++		lf.lfWeight = FW_NORMAL;
++		if (!lpFontFunc(&lf, &tm, 0, lParam))
++			return 0;
++	}
++
++#if HAVE_FREETYPE_SUPPORT
++	if (freetype_init(psd)) {
++		int		n = 0;
++		char		*p;
++		MWFONTLIST	**lst;
++
++		GdGetFontList(&lst, &n);
++		memset(&lf, 0, sizeof(lf));
++		for (i = 0; i < n; i++) {
++			strncpy(lf.lfFaceName, lst[i]->mwname,
++				sizeof(lf.lfFaceName));
++			p = strrchr(lf.lfFaceName, '.');
++			if ((p != NULL) && strcasecmp(p, ".ttf") == 0)
++				*p = 0;
++//snprintf (lf.lfFaceName, sizeof(lf.lfFaceName), "%s:%s", lst[i]->mwname, lst[i]->ttname);
++			if (!lpFontFunc(&lf, &tm, 0, lParam))
++				return 0;
++		}
++		GdFreeFontList(&lst, n);
++	}
++#endif
++	return 1;
++}
+Index: microwindows-0.91-20090128/src/drivers/fbportrait_down.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fbportrait_down.c
++++ microwindows-0.91-20090128/src/drivers/fbportrait_down.c
+@@ -45,10 +45,10 @@ fbportrait_fillrect(PSD psd,MWCOORD x1,
+ {
+ 	y2 = psd->yvirtres-y2-1;
+ 	y1 = psd->yvirtres-y1-1;
+-	x1 = psd->xvirtres-x2-1;
+-	x2 = psd->xvirtres-x1-1;
++	x1 = psd->xvirtres-x1-1;
++	x2 = psd->xvirtres-x2-1;
+ 	while(y2 <= y1)
+-		psd->DrawHorzLine(psd, x1, x2, y2++, c);
++		psd->orgsubdriver->DrawHorzLine(psd, x2, x1, y2++, c);
+ }
+ 
+ static void
+@@ -65,9 +65,103 @@ fbportrait_stretchblit(PSD dstpsd, MWCOO
+ 	MWCOORD dsth, PSD srcpsd, MWCOORD srcx, MWCOORD srcy, MWCOORD srcw,
+ 	MWCOORD srch, long op)
+ {
+-	//dstpsd->orgsubdriver->StretchBlit(dstpsd, dstpsd->yvirtres-desty-dsth, destx,
+-		//dsth, dstw, srcpsd, srcpsd->yvirtres-srcy-srch, srcx,
+-		//srch, srcw, op);
++	dstpsd->orgsubdriver->StretchBlit(dstpsd, dstpsd->xvirtres-destx-dstw, dstpsd->yvirtres-desty-dsth,
++		dstw, dsth, srcpsd, srcpsd->xvirtres-srcx-srcw, srcpsd->yvirtres-srcy-srch,
++		srcw, srch, op);
++}
++
++static void
++fbportrait_drawarea_alphacol(PSD psd, driver_gc_t * gc)
++{
++	ADDR16 dst;
++	ADDR8 alpha;
++	unsigned ps, pd;
++	int as;
++	long psr, psg, psb;
++	int x, y;
++	int src_row_step, dst_row_step;
++
++	alpha = ((ADDR8) gc->misc) + gc->src_linelen * gc->srcy + gc->srcx;
++	dst = ((ADDR16) psd->addr) + psd->linelen * (psd->yvirtres - gc->dsty -1) + (psd->xvirtres - gc->dstx -1);
++	ps = gc->fg_color;
++
++	src_row_step = gc->src_linelen - gc->dstw;
++	dst_row_step = psd->linelen - gc->dstw;
++
++#define COLOR_MASK_R_565 0xF800U
++#define COLOR_MASK_G_565 0x07E0U
++#define COLOR_MASK_B_565 0x001FU
++
++	DRAWON;
++		psr = (long) (ps & COLOR_MASK_R_565);
++		psg = (long) (ps & COLOR_MASK_G_565);
++		psb = (long) (ps & COLOR_MASK_B_565);
++
++		for (y = 0; y < gc->dsth; y++) {
++			for (x = 0; x < gc->dstw; x++) {
++				as = *alpha++;
++				if (as == 255) {
++					*dst-- = ps;   // *dst++
++				} else if (as != 0) {
++					/*
++					 * Scale alpha value from 255ths to 256ths
++					 * (In other words, if as >= 128, add 1 to it)
++					 *
++					 * Also flip the direction of alpha, so it's
++					 * backwards from it's usual meaning.
++					 * This is because the equation below is most
++					 * easily written with source and dest interchanged
++					 * (since we can split ps into it's components
++					 * before we enter the loop)
++					 */
++					as = 256 - (as + (as >> 7));
++					pd = *dst;
++
++					*dst-- = ((unsigned)
++						  (((((long)
++						      (pd & COLOR_MASK_R_565)
++						      - psr) * as) >> 8) +
++						   psr) & COLOR_MASK_R_565)
++						|
++						((unsigned)
++						 (((((long)
++						     (pd & COLOR_MASK_G_565) -
++						     psg) * as) >> 8) +
++						  psg) & COLOR_MASK_G_565)
++						|
++						((unsigned)
++						 (((((long)
++						     (pd & COLOR_MASK_B_565) -
++						     psb) * as) >> 8) +
++						  psb) & COLOR_MASK_B_565);
++				} else {
++					dst--;
++				}
++			}
++			alpha += src_row_step;
++			dst -= dst_row_step;
++		}
++	DRAWOFF;
++}
++
++static void
++fbportrait_drawarea(PSD dstpsd, driver_gc_t * gc, int op)
++{
++	if (!dstpsd->orgsubdriver->DrawArea) {
++		return;
++	}
++
++	switch(op) {
++#if MW_FEATURE_PSDOP_ALPHACOL
++	case PSDOP_ALPHACOL:
++		fbportrait_drawarea_alphacol(dstpsd, gc);
++		break;
++#endif /* MW_FEATURE_PSDOP_ALPHACOL */
++
++	default:
++		break;
++	}
++
+ }
+ 
+ SUBDRIVER fbportrait_down = {
+@@ -76,8 +170,8 @@ SUBDRIVER fbportrait_down = {
+ 	fbportrait_readpixel,
+ 	fbportrait_drawhorzline,
+ 	fbportrait_drawvertline,
+-	gen_fillrect,
++	fbportrait_fillrect, // gen_fillrect,
+ 	fbportrait_blit,
+-	NULL,
++	fbportrait_drawarea,
+ 	fbportrait_stretchblit
+ };
+Index: microwindows-0.91-20090128/src/drivers/fbportrait_right.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fbportrait_right.c
++++ microwindows-0.91-20090128/src/drivers/fbportrait_right.c
+@@ -52,9 +52,9 @@ static void
+ fbportrait_fillrect(PSD psd,MWCOORD x1, MWCOORD y1, MWCOORD x2, MWCOORD y2,
+ 	MWPIXELVAL c)
+ {
+-	while(x2 <= x1)
++        while(x1 <= x2)
+ 		psd->orgsubdriver->DrawHorzLine(psd, psd->yvirtres-y2-1,
+-			psd->yvirtres-y1-1, x2++, c);
++			psd->yvirtres-y1-1, x1++, c);
+ }
+ 
+ static void
+@@ -70,19 +70,83 @@ fbportrait_stretchblit(PSD dstpsd, MWCOO
+ 	MWCOORD dsth, PSD srcpsd, MWCOORD srcx, MWCOORD srcy, MWCOORD srcw,
+ 	MWCOORD srch, long op)
+ {
+-	//dstpsd->orgsubdriver->StretchBlit(dstpsd, dstpsd->yvirtres-desty-dsth, destx,
+-		//dsth, dstw, srcpsd, srcpsd->yvirtres-srcy-srch, srcx,
+-		//srch, srcw, op);
++	dstpsd->orgsubdriver->StretchBlit(dstpsd, dstpsd->yvirtres-desty-dsth, destx,
++		dsth, dstw, srcpsd, srcpsd->yvirtres-srcy-srch, srcx,
++		srch, srcw, op);
+ }
+ 
++static void
++fbportrait_drawarea_alphacol(PSD dstpsd, driver_gc_t * gc)
++{
++	driver_gc_t	l_gc;
++	ADDR8 alpha_in, alpha_out;
++	int	in_x, in_y;
++	int	in_w, in_h;
++	int	out_x, out_y;
++	int	out_w, out_h;
++
++	l_gc = *gc;
++	l_gc.dstx = dstpsd->yvirtres - gc->dsty - gc->dsth;
++	l_gc.dsty = gc->dstx;
++	l_gc.dstw = gc->dsth;
++	l_gc.dsth = gc->dstw;
++
++	l_gc.srcx = 0;
++	l_gc.srcy = 0;
++	l_gc.src_linelen = l_gc.dstw;
++	if (!(l_gc.misc = malloc(l_gc.dstw * l_gc.dsth))) {
++		return;
++	}
++
++	alpha_in = ((ADDR8) gc->misc) + gc->src_linelen * gc->srcy + gc->srcx;
++	in_w = gc->dstw;
++	in_h = gc->dsth;
++
++	alpha_out = l_gc.misc;
++	out_w = l_gc.dstw;
++	out_h = l_gc.dsth;
++
++	for (in_y = 0; in_y < in_h; in_y++) {
++		for (in_x = 0; in_x < in_w; in_x++) {
++			out_y = in_x;
++			out_x = ((out_w - 1) - in_y);
++
++			alpha_out[((out_y * out_w) + out_x)] = alpha_in[((in_y * in_w) + in_x)];
++		}
++	}
++
++	dstpsd->orgsubdriver->DrawArea(dstpsd, &l_gc, PSDOP_ALPHACOL);
++
++	free((void *)l_gc.misc);
++}
++
++static void
++fbportrait_drawarea(PSD dstpsd, driver_gc_t * gc, int op)
++{
++	if (!dstpsd->orgsubdriver->DrawArea) {
++		return;
++	}
++
++	switch(op) {
++#if MW_FEATURE_PSDOP_ALPHACOL
++	case PSDOP_ALPHACOL:
++		fbportrait_drawarea_alphacol(dstpsd, gc);
++		break;
++#endif /* MW_FEATURE_PSDOP_ALPHACOL */
++
++	default:
++		break;
++	}
++
++}
+ SUBDRIVER fbportrait_right = {
+ 	NULL,
+ 	fbportrait_drawpixel,
+ 	fbportrait_readpixel,
+ 	fbportrait_drawhorzline,
+ 	fbportrait_drawvertline,
+-	gen_fillrect,
++	fbportrait_fillrect,  // gen_fillrect,
+ 	fbportrait_blit,
+-	NULL,
++	fbportrait_drawarea,
+ 	fbportrait_stretchblit
+ };
+Index: microwindows-0.91-20090128/src/drivers/genfont.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/genfont.c
++++ microwindows-0.91-20090128/src/drivers/genfont.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 1999, 2000, 2003 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999, 2000, 2003, 2005 Greg Haerr <greg@censoft.com>
+  *
+  * Screen Driver Utilities
+  * 
+@@ -63,6 +63,16 @@ MWCOREFONT gen_fonts[NUMBER_FONTS] = {
+ 	{&fontprocs, 0, 0, 0, "Terminal",          &font_X6x13}	/* redirect*/
+ };
+ 
++/*GB: pointer to an user builtin font table. */
++MWCOREFONT *user_builtin_fonts = NULL;
++
++/*  Sets the fontproc to fontprocs.  */
++void
++gen_setfontproc(MWCOREFONT *pf)
++{
++	pf->fontprocs = &fontprocs;
++}
++
+ /*
+  * Generalized low level get font info routine.  This
+  * routine works with fixed and proportional fonts.
+@@ -168,16 +178,24 @@ gen_gettextbits(PMWFONT pfont, int ch, c
+ 	ch -= pf->firstchar;
+ 
+ 	/* get font bitmap depending on fixed pitch or not*/
+-	bits = pf->bits + (pf->offset? pf->offset[ch]: (pf->height * ch));
+- 	width = pf->width ? pf->width[ch] : pf->maxwidth;
+-	count = MWIMAGE_WORDS(width) * pf->height; 
++	/* GB: automatically detect if offset is 16 or 32 bit */
++	if( pf->offset ) {
++		if( ((unsigned long*)pf->offset)[0] >= 0x00010000 )
++			bits = pf->bits + ((unsigned short*)pf->offset)[ch];
++		else
++			bits = pf->bits + ((unsigned long*)pf->offset)[ch];
++	} else
++		bits = pf->bits + (pf->height * ch);
++
++	width = pf->width ? pf->width[ch] : pf->maxwidth;
++	count = MWIMAGE_WORDS(width) * pf->height;
+ 
+ 	*retmap = bits;
+ 
+ 	/* return width depending on fixed pitch or not*/
+-	*pwidth = width; 
++	*pwidth = width;
+ 	*pheight = pf->height;
+-	*pbase = pf->ascent; 
++	*pbase = pf->ascent;
+ }
+ 
+ void
+Index: microwindows-0.91-20090128/src/engine/devpoly.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devpoly.c
++++ microwindows-0.91-20090128/src/engine/devpoly.c
+@@ -24,9 +24,9 @@
+  */
+ 
+ /* set polygon fill routine*/
+-#define EDGEPOLYFILL	1	/* edge table, malloc, qsort*/
++#define EDGEPOLYFILL	0	/* edge table, malloc, qsort*/
+ #define X11POLYFILL	0	/* X11-derived polygon fill*/
+-#define BASICPOLYFILL	0	/* very basic, small polygon fill*/
++#define BASICPOLYFILL	1/* very basic, small polygon fill*/
+ 
+ /* extern definitions*/
+ void drawpoint(PSD psd,MWCOORD x, MWCOORD y);
+Index: microwindows-0.91-20090128/src/engine/font_freetype2.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/font_freetype2.c
++++ microwindows-0.91-20090128/src/engine/font_freetype2.c
+@@ -1280,7 +1280,7 @@ freetype2_drawtext(PMWFONT pfont, PSD ps
+ 		FT_Bitmap *bitmap;
+ #endif
+ 
+-		ay += (pos.y >> 6);
++		ay -= (pos.y >> 6);
+ 
+ 		for (i = 0; i < cc; i++) {
+ 			curchar = LOOKUP_CHAR(pf, face, str[i]);
+Index: microwindows-0.91-20090128/src/mwin/winmain.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winmain.c
++++ microwindows-0.91-20090128/src/mwin/winmain.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 1999, 2000, 2004 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 1999, 2000, 2004, 2005 Greg Haerr <greg@censoft.com>
+  *
+  * Main module of Microwindows
+  */
+@@ -27,12 +27,17 @@
+ #include <linuxmt/time.h>
+ #endif
+ 
+-#if RTEMS
++#if RTEMS || __ECOS
+ #include <rtems/mw_uid.h>
+ #endif
+ 
++#if __ECOS
++#include <cyg/kernel/kapi.h>
++#endif
++
+ #include "windows.h"
+ #include "wintern.h"
++#include "winres.h"
+ #include "device.h"
+ 
+ /*
+@@ -53,8 +58,14 @@ int		mouse_fd;		/* the mouse file descri
+ int		escape_quits = 1;	/* terminate when pressing ESC */
+ 
+ int
+-main(int ac,char **av)
++#if __ECOS
++invoke_WinMain(int ac,char **av)
++#else
++   main(int ac,char **av)
++#endif
+ {
++    HINSTANCE hInstance;
++
+ 	/* call user hook routine before anything*/
+ 	if(MwUserInit(ac, av) < 0)
+ 		exit(1);
+@@ -62,9 +73,16 @@ main(int ac,char **av)
+ 	if(MwOpen() < 0)
+ 		exit(1);
+ 
++	if( (hInstance=mwCreateInstance(ac, av)) == NULL )
++	    exit(1);
++
++	rootwp->hInstance = hInstance;
++
+ 	/* call windows main program entry point*/
+-	WinMain(NULL, NULL, NULL, SW_SHOW);
++	WinMain ( hInstance, NULL,
++		  (LPSTR)((PMWAPPINSTANCE)hInstance)->szCmdLine, SW_SHOW );
+ 
++	mwFreeInstance ( hInstance );
+ 	MwClose();
+ 	return 0;
+ }
+@@ -230,7 +248,7 @@ MwUnregisterFdExcept(HWND hwnd, int fd)
+ 
+ #if MSDOS | _MINIX
+ void
+-MwSelect(void)
++MwSelect(BOOL mayWait)
+ {
+ 	/* If mouse data present, service it*/
+ 	if(mousedev.Poll())
+@@ -252,7 +270,7 @@ static int fade = 0;
+ #endif
+ 
+ void
+-MwSelect(void)
++MwSelect(BOOL mayWait)
+ {
+ 	fd_set	rfds;
+ 	fd_set	wfds;
+@@ -261,7 +279,8 @@ MwSelect(void)
+ 	int 	e;
+ 	int	setsize = 0;
+ 	UINT	timeout;
+-	struct timeval to;
++	struct timeval to, *pto;
++	BOOL    maybeInfinite = TRUE;
+ 
+ 	/* perform pre-select duties, if any*/
+ 	if(scrdev.PreSelect)
+@@ -300,25 +319,37 @@ MwSelect(void)
+ 	 * so poll quickly to allow other windows to repaint while
+ 	 * checking for more event input.
+ 	 */
+-	if(dragwp)
+-		timeout = to.tv_sec = to.tv_usec = 0L;
+-	else {
++	timeout = to.tv_sec = to.tv_usec = 0L;
++	pto = &to;
++	if( !dragwp && mayWait ) {
+ 		timeout = MwGetNextTimeoutValue();	/* returns ms*/
++		if( (int)timeout == -1 ) // this means that no timers exists
++			timeout = 0;
++		else
++			maybeInfinite = FALSE;
+ #if ANIMATEPALETTE
+ 		if(fade < 100)
+ 			timeout = 40;
+ #endif
+-if (!timeout) timeout = 10;	/* temp kluge required for mdemo to run ok*/
++//if (!timeout) timeout = 10;	/* temp kluge required for mdemo to run ok*/
+ #if MW_FEATURE_TIMERS
+-		GdGetNextTimeout(&to, timeout);
++		if( !GdGetNextTimeout(&to, timeout) ) {
++			to.tv_sec = timeout / 1000;
++			to.tv_usec = (timeout % 1000) * 1000;
++		} else
++			maybeInfinite = FALSE;
+ #else /* if ! MW_FEATURE_TIMERS */
+ 		to.tv_sec = timeout / 1000;
+ 		to.tv_usec = (timeout % 1000) * 1000;
+ #endif /* ! MW_FEATURE_TIMERS */
++		/*  If no timers are scheduled
++		    so the select function will wait forever...  */
++		if( maybeInfinite && (to.tv_sec == 0) && (to.tv_usec == 0) )
++			pto = NULL;
+ 	}
+ 
+ 	/* Wait for some input on any of the fds in the set or a timeout: */
+-	if((e = select(setsize, &rfds, &wfds, &efds, &to)) > 0) {
++	if((e = select(setsize, &rfds, &wfds, &efds, pto)) > 0) {
+ 		
+ 		/* If data is present on the mouse fd, service it: */
+ 		if(mouse_fd >= 0 && FD_ISSET(mouse_fd, &rfds))
+@@ -327,8 +358,10 @@ if (!timeout) timeout = 10;	/* temp klug
+ 
+ 		/* If data is present on the keyboard fd, service it: */
+ 		if(keyb_fd >= 0 && FD_ISSET(keyb_fd, &rfds))
++			MwCheckKeyboardEvent();
++/*	GB: Only one key at a time is posted to focused window...
+ 			while(MwCheckKeyboardEvent())
+-				continue;
++				continue;	*/
+ 
+ 		/* If registered descriptor, handle it */
+ 		fd = userregfd_head;
+@@ -357,18 +390,18 @@ if (!timeout) timeout = 10;	/* temp klug
+ 		MwHandleTimers();
+ 	} else
+ 		if(errno != EINTR)
+-			EPRINTF("Select() call in main failed\n");
++			EPRINTF("Select() call in main failed. Errno=%d\n", errno);
+ }
+ #endif
+ 
+-#if RTEMS
++#if RTEMS || __ECOS
+ extern MWBOOL MwCheckMouseEvent();
+ extern MWBOOL MwCheckKeyboardEvent();
+ extern struct MW_UID_MESSAGE m_kbd;
+ extern struct MW_UID_MESSAGE m_mou;
+ extern HWND  dragwp;     /* window user is dragging*/
+ 
+-void MwSelect (void)
++void MwSelect (BOOL mayWait)
+ {
+         struct MW_UID_MESSAGE m;
+ 	int rc;
+@@ -473,8 +506,11 @@ MwInitialize(void)
+   	}
+ 	userregfd_head = -1;
+ #endif
++
++#ifndef __ECOS
+ 	/* catch terminate signal to restore tty state*/
+ 	signal(SIGTERM, (void *)MwTerminate);
++#endif
+ 
+ 	startTicks = GetTickCount();
+ 	
+@@ -488,6 +524,10 @@ MwInitialize(void)
+ 		GdCloseKeyboard();
+ 		return -1;
+ 	}
++//    GdSetPortraitMode(psd,MWPORTRAIT_DOWN);
++//    GdSetPortraitMode(psd,MWPORTRAIT_NONE);
++//  GdSetPortraitMode(psd,MWPORTRAIT_LEFT);
++  GdSetPortraitMode(psd,MWPORTRAIT_RIGHT);
+ 
+ 	if ((mouse_fd = GdOpenMouse()) == -1) {
+ 		EPRINTF("Cannot initialise mouse\n");
+@@ -536,6 +576,13 @@ MwInitialize(void)
+ 	wp->cursor = NULL;
+ 	wp->unmapcount = 0;
+ 	wp->id = 0;
++	wp->szTitle = (LPTSTR) malloc ( 64 );
++	wp->lpfnWndProc = wc.lpfnWndProc;
++	wp->hInstance = NULL;
++	wp->nEraseBkGnd = 1;
++	wp->paintBrush = NULL;
++	wp->paintPen = NULL;
++
+ 	strcpy(wp->szTitle, "Microwindows");
+ 	wp->gotPaintMsg = PAINT_PAINTED;
+ #if UPDATEREGIONS
+@@ -565,6 +612,7 @@ MwInitialize(void)
+ 	GdShowCursor(psd);
+ 	MwMoveCursor(psd->xvirtres / 2, psd->yvirtres / 2);
+ 	MwSetCursor(rootwp, &arrow);
++//	GdHideCursor(psd);
+ 
+ 	/*
+ 	 * Finally tell the mouse driver some things.
+@@ -607,6 +655,10 @@ GetTickCount(VOID)
+ 	
+ 	return (DWORD)times(&t) * 16;
+ #else
++#if __ECOS
++  /* CYGNUM_HAL_RTC_NUMERATOR/CYGNUM_HAL_RTC_DENOMINATOR gives the length of one tick in nanoseconds */
++   return (cyg_current_time()*(CYGNUM_HAL_RTC_NUMERATOR/CYGNUM_HAL_RTC_DENOMINATOR))/(1000*1000);
++#else
+ #if UNIX
+ 	struct timeval t;
+ 
+@@ -617,6 +669,7 @@ GetTickCount(VOID)
+ #endif
+ #endif
+ #endif
++#endif
+ }
+ 
+ VOID WINAPI
+Index: microwindows-0.91-20090128/src/drivers/mou_tslib.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/mou_tslib.c
++++ microwindows-0.91-20090128/src/drivers/mou_tslib.c
+@@ -38,9 +38,9 @@ static int PD_Open(MOUSEDEVICE *pmd)
+ 	char *tsdevice=NULL;
+ 
+ 	if( (tsdevice = getenv("TSLIB_TSDEVICE")) != NULL ) {
+-		pd_fd = ts_open(tsdevice,0);
++		pd_fd = ts_open(tsdevice,1);
+ 	} else {
+-		pd_fd = ts_open("/dev/input/event1", 0);
++		pd_fd = ts_open("/dev/event0", 1);
+ 	}
+ 
+ 	if(pd_fd == NULL) {
+@@ -52,7 +52,7 @@ static int PD_Open(MOUSEDEVICE *pmd)
+ 		EPRINTF("Error %d config tslib\n", errno);
+ 		return -1;
+ 	}
+-
++	GdHideCursor(&scrdev);
+ 	return *((int *)pd_fd);
+ }
+ 
+@@ -107,5 +107,5 @@ MOUSEDEVICE mousedev = {
+ 	PD_GetDefaultAccel,
+ 	PD_Read,
+ 	NULL,
+-	MOUSE_TRANSFORM   /* Input filter flags */
++	MOUSE_RAW   /* Input filter flags */
+ };
+Index: microwindows-0.91-20090128/src/include/windows.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/windows.h
++++ microwindows-0.91-20090128/src/include/windows.h
+@@ -5,6 +5,10 @@
+  * Copyright (c) 1999, 2000 Greg Haerr <greg@censoft.com>
+  *
+  * Microwindows Win32 API master public header file
++ * Modifications:
++ *  Date        Author                  Description
++ *  2004/12/07  Gabriele Brugnoni       added lpfnWndProc param on wnd struct, so
++ *                                      SetWindowLong(GWL_WNDPROC) may works on multiple wnd.
+  */
+ #ifdef __cplusplus
+ extern "C" {
+@@ -16,6 +20,9 @@ extern "C" {
+ #include "winfont.h"
+ #include "winkbd.h"
+ #include "winuser.h"	/* now includes winctl.h for resource compiler*/
++#include "winres.h"
++#include "windlg.h"
++
+ 
+ /* external routines*/
+ int WINAPI 	WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+@@ -116,6 +123,7 @@ struct hwnd {
+ 	DWORD		style;		/* window style*/
+ 	DWORD		exstyle;	/* window extended style*/
+ 	PWNDCLASS	pClass;		/* window class*/
++    WNDPROC     lpfnWndProc;/* default window procedure (initialized from pClass) */
+ 	struct hwnd	*parent;	/* z-order parent window */
+ 	struct hwnd	*owner;		/* owner window*/
+ 	struct hwnd	*children;	/* first child window */
+@@ -125,15 +133,19 @@ struct hwnd {
+ 	struct hdc *	owndc;		/* owndc if CS_OWNDC*/
+ 	int		unmapcount;	/* count of reasons not really mapped */
+ 	int		id;		/* window id */
+-	CHAR		szTitle[64];	/* window title*/
++	LPTSTR	szTitle;	/* window title*/
+ 	int		gotPaintMsg;	/* window had WM_PAINT PostMessage*/
+ 	int		paintSerial;	/* experimental serial # for alphblend*/
+ 	int		paintNC;	/* experimental NC paint handling*/
++	int		nEraseBkGnd;	/* for InvalidateXX erase bkgnd flag */
++	HBRUSH	paintBrush;		/* brush created to paint some controls */
++	HPEN	paintPen;		/* pen created to paint some controls */
+ 	MWCLIPREGION *	update;		/* update region in screen coords*/
+ 	DWORD		userdata;	/* setwindowlong user data*/
+ 	DWORD		userdata2;	/* additional user data (will remove)*/
+ 	MWSCROLLBARINFO	hscroll;	/* NC scrollbars*/
+ 	MWSCROLLBARINFO	vscroll;
++	HINSTANCE	hInstance;	/* hInstance */
+ 	int		nextrabytes;	/* # window extra bytes*/
+ 	char		extrabytes[1];	/* window extra bytes - must be last*/
+ };
+Index: microwindows-0.91-20090128/src/include/windlg.h
+===================================================================
+--- /dev/null
++++ microwindows-0.91-20090128/src/include/windlg.h
+@@ -0,0 +1,144 @@
++/*
++ *  windlg.h
++ *
++ * Microwindows Dialog implementation
++ *
++ * Copyrigth (C) 2003 - Gabriele Brugnoni
++ *
++ * gabrielebrugnoni@dveprojects.com
++ * DVE Prog. El. - Varese, Italy
++ */
++#ifndef __WINDLG_H__
++#define __WINDLG_H__
++
++/*
++ * For GetWindowLong - SetWindowLong
++ */
++#define DWL_MSGRESULT   0
++#define DWL_DLGPROC     4
++#define DWL_USER        8
++
++
++/*
++ * Dialog Styles
++ */
++#define DS_ABSALIGN         0x0001L
++#define DS_SYSMODAL         0x0002L
++#define DS_LOCALEDIT        0x0020L
++#define DS_SETFONT          0x0040L
++#define DS_MODALFRAME       0x0080L
++#define DS_NOIDLEMSG        0x0100L
++#define DS_SETFOREGROUND    0x0200L
++
++#define DS_3DLOOK           0x0004L
++#define DS_FIXEDSYS         0x0008L
++#define DS_NOFAILCREATE     0x0010L
++#define DS_CONTROL          0x0400L
++#define DS_CENTER           0x0800L
++#define DS_CENTERMOUSE      0x1000L
++#define DS_CONTEXTHELP      0x2000L
++
++
++#ifndef IsChild
++#define IsChild(Parent, Children)	((Children)->parent == (Parent))
++#endif
++
++
++#ifndef IDOK
++#define IDOK		1
++#endif
++#ifndef IDCANCEL
++#define IDCANCEL	2
++#endif
++#ifndef IDC_STATIC
++#define IDC_STATIC	-1
++#endif
++
++/*
++ *  Struct for WM_DRAWITEM
++ */
++typedef struct tagDRAWITEMSTRUCT
++{
++	UINT CtlType;
++	UINT CtlID;
++	UINT itemID;
++	UINT itemAction;
++	UINT itemState;
++	HWND hwndItem;
++	HDC hDC;
++	RECT rcItem;
++	DWORD itemData;
++} DRAWITEMSTRUCT, *LPDRAWITEMSTRUCT;
++
++enum DRWITYPE {
++	ODT_BUTTON,
++	ODT_COMBOBOX,
++	ODT_LISTBOX,
++	ODT_LITVIEW,
++	ODT_MENU,
++	ODT_STATIC,
++	ODT_TAB
++};
++
++#define ODA_DRAWENTIRE		0x0001
++#define ODA_FOCUS			0x0002
++#define ODA_SELECT			0x0004
++
++#define ODS_CHECKED			0x0001
++#define ODS_COMBOBOXEDIT	0x0002
++#define ODS_DEFAULT			0x0004
++#define ODS_DISABLED		0x0008
++#define ODS_FOCUS			0x0010
++#define ODS_GRAYED			0x0020
++#define ODS_SELECTED		0x0040
++
++
++typedef struct tagMEASUREITEMSTRUCT
++{
++	UINT CtlType;
++	UINT CtlID;
++	UINT itemID;
++	UINT itemWidth;
++	UINT itemHeight;
++	DWORD itemData;
++} MEASUREITEMSTRUCT, *LPMEASUREITEMSTRUCT;
++
++
++BOOL WINAPI MwInitializeDialogs ( HINSTANCE hInstance );
++
++LONG WINAPI GetDlgBaseUnits ( void );
++BOOL WINAPI MapDialogRect ( HWND hWnd, LPRECT lpRc );
++
++
++HWND WINAPI CreateDialogParam ( HINSTANCE hInstance, LPCTSTR lpTemplate,
++				HWND hWndParent, DLGPROC lpDialogFunc,
++				LPARAM dwInitParam );
++
++HWND WINAPI CreateDialog ( HINSTANCE hInstance, LPCSTR lpTemplate,
++						   HWND hWndParent, DLGPROC lpDialogFunc );
++
++int WINAPI DialogBox ( HINSTANCE hInstance, LPCTSTR lpTemplate,
++		       HWND hWndParent, DLGPROC lpDialogFunc );
++
++int WINAPI DialogBoxParam ( HINSTANCE hInstance, LPCTSTR lpTemplate,
++			    HWND hWndParent, DLGPROC lpDialogFunc,
++			    LPARAM lParam );
++
++BOOL WINAPI EndDialog ( HWND hDlg, int nResult );
++BOOL CALLBACK DefDlgProc ( HWND hDlg, UINT Msg, WPARAM wParam, LPARAM lParam );
++
++
++LRESULT WINAPI SendDlgItemMessage ( HWND hwnd, int id, UINT Msg, WPARAM wParam, LPARAM lParam );
++
++BOOL WINAPI IsDialogMessage ( HWND hDlg, LPMSG lpMsg );
++
++UINT WINAPI GetDlgItemText ( HWND hwnd, int id, LPTSTR pStr, int nSize );
++BOOL WINAPI SetDlgItemText ( HWND hwnd, int id, LPTSTR pStr );
++BOOL WINAPI SetDlgItemInt ( HWND hwnd, int id, UINT val, BOOL bSigned );
++UINT WINAPI GetDlgItemInt ( HWND hwnd, int id, BOOL *pbTransl, BOOL bSigned );
++UINT IsDlgButtonChecked ( HWND hDlg, int id );
++BOOL WINAPI CheckDlgButton ( HWND hDlg, int id, UINT mode );
++//BOOL WINAPI CheckRadioButton ( HWND hDlg, int idFirst, int idLast, int idCheck );
++
++
++#endif /*__WINDLG_H__*/
+Index: microwindows-0.91-20090128/src/include/winres.h
+===================================================================
+--- /dev/null
++++ microwindows-0.91-20090128/src/include/winres.h
+@@ -0,0 +1,236 @@
++/*
++ *  winres.h
++ *
++ * Microwindows Resource declarations
++ *
++ * Copyright (C) 2003 - Gabriele Brugnoni
++ *
++ * gabrielebrugnoni@dveprojects.com
++ * DVE Prog. El. - Varese, Italy
++ */
++#ifndef __WINRES_H__
++#define __WINRES_H__
++#include <stdio.h>	/* for FILE...*/
++
++//  For some architecture, the data readed in structures
++//  must be declared as packed...
++#if defined(GCC_VERSION)
++#define RESPACKEDDATA	__attribute__ ((__packed__))
++#else
++#define RESPACKEDDATA
++#endif
++
++/*
++ *  Application instance data
++ */
++typedef struct tagMWAPPINSTANCE
++{
++    LPCSTR szExecCommand;
++    LPCSTR szResFilename;
++    LPCSTR szCmdLine;
++    int argc;
++    char **argv;
++    FILE *fResources;
++} MWAPPINSTANCE, *PMWAPPINSTANCE;
++
++
++//  Some system functions, used by mw core
++void mwFreeInstance ( HINSTANCE hInst );
++HINSTANCE mwCreateInstance ( int argc, char *argv[] );
++
++
++
++
++#define MAKEINTRESOURCE(id)	(LPTSTR) MAKELONG((id), 0xFFFF)
++
++/*
++ *	Resource header
++ */
++typedef struct tagMWRESOURCEHEADER
++{
++    DWORD DataSize;
++    DWORD HeaderSize;
++    // ordinal type and name are here in file.
++    DWORD DataVersion;
++    WORD RESPACKEDDATA MemoryFlags;
++    WORD RESPACKEDDATA LanguageId;
++    DWORD RESPACKEDDATA Version;
++    DWORD RESPACKEDDATA Characteristics;
++} MWRESOURCEHEADER, *PMWRESOURCEHEADER;
++
++
++/*
++ *  Resource type
++ */
++enum MW_RESOURCE_TYPES {
++    W_RT_CURSOR=1,
++    W_RT_BITMAP,
++    W_RT_ICON,
++    W_RT_MENU,
++    W_RT_DIALOG,
++    W_RT_STRING,
++    W_RT_FONTDIR,
++    W_RT_FONT,
++    W_RT_ACCELERATOR,
++    W_RT_RCDATA,
++    W_RT_MESSAGETABLE,
++    W_RT_GROUP_CURSOR,
++    W_RT_GROUP_ICON,
++    W_RT_VERSION,
++    W_RT_DLGINCLUDE,
++    W_RT_PLUGPLAY,
++    W_RT_VXD,
++    W_RT_ANICURSOR,
++    W_RT_ANIICON,
++    W_RT_HTML,
++};
++
++#define RT_CURSOR		MAKEINTRESOURCE(W_RT_CURSOR)
++#define RT_BITMAP		MAKEINTRESOURCE(W_RT_BITMAP)
++#define RT_ICON			MAKEINTRESOURCE(W_RT_ICON)
++#define RT_MENU			MAKEINTRESOURCE(W_RT_MENU)
++#define RT_DIALOG		MAKEINTRESOURCE(W_RT_DIALOG)
++#define RT_STRING		MAKEINTRESOURCE(W_RT_STRING)
++#define RT_FONTDIR		MAKEINTRESOURCE(W_RT_FONTDIR)
++#define RT_FONT			MAKEINTRESOURCE(W_RT_FONT)
++#define RT_ACCELERATOR	MAKEINTRESOURCE(W_RT_ACCELERATOR)
++#define RT_RCDATA		MAKEINTRESOURCE(W_RT_RCDATA)
++#define RT_MESSAGETABLE	MAKEINTRESOURCE(W_RT_MESSAGETABLE)
++#define RT_GROUP_CURSOR	MAKEINTRESOURCE(W_RT_GROUP_CURSOR)
++#define RT_GROUP_ICON	MAKEINTRESOURCE(W_RT_GROUP_ICON)
++#define RT_VERSION		MAKEINTRESOURCE(W_RT_VERSION)
++#define RT_DLGINCLUDE	MAKEINTRESOURCE(W_RT_DLGINCLUDE)
++#define RT_PLUGPLAY		MAKEINTRESOURCE(W_RT_PLUGPLAY)
++#define RT_VXD			MAKEINTRESOURCE(W_RT_VXD)
++#define RT_ANICURSOR	MAKEINTRESOURCE(W_RT_ANICURSOR)
++#define RT_ANIICON		MAKEINTRESOURCE(W_RT_ANIICON)
++#define RT_HTML			MAKEINTRESOURCE(W_RT_HTML)
++
++
++/*
++ *  DIALOG RESOURCE HEADER
++ */
++typedef struct tagMWDLGTEMPLATE
++{
++    DWORD style;
++    DWORD dwExtendedStyle;
++    WORD  RESPACKEDDATA cdit;
++    short RESPACKEDDATA x;
++    short RESPACKEDDATA y;
++    short RESPACKEDDATA cx;
++    short RESPACKEDDATA cy;
++    /* other information that follows, var length */
++	char extraData[1];
++} MWDLGTEMPLATE, *PMWDLGTEMPLATE;
++
++#define FIXSZ_MWDLGTEMPLATE		20
++
++
++// Dialog Extra data, dynamic allocated
++typedef struct tagMWDLGTEMPLEXTRA
++{
++	LPTSTR szIdMenu;
++	LPTSTR szClassName;
++    LPTSTR szDlgName;
++    WORD fontSize;
++    LPTSTR szFontName;
++	int nItems;
++	struct tagMWDLGITEMTEMPLATE **pItems;
++	struct tagMWDLGITEMTEMPLEXTRA *pItemsExtra;
++} MWDLGTEMPLEXTRA, *PMWDLGTEMPLEXTRA;
++
++
++
++/*
++ *  DIALOG ITEMS
++ */
++typedef struct tagMWDLGITEMTEMPLATE
++{
++    DWORD style;
++    DWORD dwExtendedStyle;
++    short RESPACKEDDATA x;
++    short RESPACKEDDATA y;
++    short RESPACKEDDATA cx;
++    short RESPACKEDDATA cy;
++    WORD  RESPACKEDDATA id;
++    /* other information that follows, var length
++	   will be allocated in MWDLGITEMTEMPLEXTRA */
++	char extraData[1];
++} MWDLGITEMTEMPLATE, *PMWDLGITEMTEMPLATE;
++
++#define FIXSZ_MWDLGITEMTEMPLATE		18
++
++// Dialog ITEMS Extra data, dynamic allocated
++typedef struct tagMWDLGITEMTEMPLEXTRA
++{
++    LPTSTR szClassName;
++    LPTSTR szCaption;
++    LPWORD lpData;
++} MWDLGITEMTEMPLEXTRA, *PMWDLGITEMTEMPLEXTRA;
++
++
++//  if szClassName length is only 1 char, the class is one of:
++enum MW_DLGITEMS_CLASSID
++{
++    DLGITEM_CLASS_BUTTON = 0x80,
++    DLGITEM_CLASS_EDIT,
++    DLGITEM_CLASS_STATIC,
++    DLGITEM_CLASS_LISTBOX,
++    DLGITEM_CLASS_SCROLLBAR,
++    DLGITEM_CLASS_COMBOBOX,
++};
++
++#define DLGITEM_CLASS_FIRSTID	DLGITEM_CLASS_BUTTON
++
++
++
++/*
++ *  Identify a resource.
++ */
++typedef struct tagMWRSRC
++{
++	FILE *f;
++	long fPos;
++	MWRESOURCEHEADER head;
++	LPCTSTR type;
++	LPCTSTR name;
++	int cLock;
++	void *pData;
++	struct tagMWRSRC *next;
++} MWRSRC, *HRSRC;
++
++
++//  Resource access internal functions
++FILE *mwFindResource ( HINSTANCE hInst, LPCTSTR resType, LPCTSTR resName,
++				       PMWRESOURCEHEADER pResHead );
++
++PMWDLGITEMTEMPLATE resNextDlgItem ( PMWDLGITEMTEMPLATE pItem );
++PMWDLGITEMTEMPLATE resFirstDlgItem ( PMWDLGTEMPLATE pDlg );
++void resDiscardDlgTemplExtra ( PMWDLGTEMPLEXTRA pDlgExtra );
++void resGetDlgTemplExtra ( PMWDLGTEMPLATE pDlg,
++						   PMWDLGTEMPLEXTRA pDlgExtra );
++void resDiscardDlgItemTemplate ( PMWDLGITEMTEMPLEXTRA pItemExtra );
++PMWDLGITEMTEMPLATE resGetDlgItemTemplExtra ( PMWDLGITEMTEMPLATE pItem,
++							   				 PMWDLGITEMTEMPLEXTRA pItemExtra );
++
++PMWIMAGEHDR resLoadBitmap ( HINSTANCE hInst, LPCTSTR resName );
++void resFreeBitmap ( PMWIMAGEHDR pImageHdr );
++
++
++
++/*
++ *  Exported functions
++ */
++HRSRC WINAPI FindResource ( HMODULE hModule, LPCTSTR resName, LPCTSTR resType );
++DWORD SizeofResource ( HMODULE hModule, HRSRC hResInfo );
++HGLOBAL WINAPI LoadResource ( HMODULE hModule, HRSRC hRes );
++BOOL WINAPI FreeResource ( HGLOBAL hObj );
++int WINAPI UnlockResource ( HGLOBAL hObj );
++LPVOID WINAPI LockResource ( HGLOBAL hObj );
++
++int WINAPI LoadString ( HINSTANCE hInstance, UINT uid,
++				        LPTSTR lpBuffer, int nMaxBuff );
++
++
++
++#endif /*__WINRES_H__*/
+Index: microwindows-0.91-20090128/src/mwin/winres.c
+===================================================================
+--- /dev/null
++++ microwindows-0.91-20090128/src/mwin/winres.c
+@@ -0,0 +1,664 @@
++/*
++ * winres.c
++ *
++ * Microwindows Resource functions
++ *
++ * Copyright (C) 2003 - Gabriele Brugnoni
++ * DVE Prog. El. - Varese, Italy
++ *
++ * gabrielebrugnoni@dveprojects.com
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <ctype.h>
++#define MWINCLUDECOLORS
++#include "windows.h"		/* windef.h, winuser.h */
++#include "winres.h"
++#include "windlg.h"
++#include "device.h"
++
++#define MAX_MRU_RESOURCES	32
++
++//  This is a pointer to a list of resources.
++static HRSRC mruResources = NULL;
++static int mruResCount = 0;
++
++
++void
++mwAddResource(HRSRC hRes)
++{
++	hRes->next = mruResources;
++	mruResources = hRes;
++	mruResCount++;
++
++	//  if we have too many resources, try to free unlocked res.
++	while (mruResCount > MAX_MRU_RESOURCES) {
++		HRSRC obj = hRes->next;
++		HRSRC prev = hRes;
++		int ndel = 0;
++		while (obj) {
++			HRSRC cobj = obj;
++			prev = obj;
++			obj = obj->next;
++			if (cobj->cLock <= 0) {
++				if (prev != NULL)
++					prev->next = cobj->next;
++				else
++					mruResources = NULL;
++				if (cobj->pData)
++					free(cobj->pData);
++				free(cobj);
++				mruResCount--;
++				ndel++;
++			}
++		}
++		if (!ndel)
++			break;
++	}
++}
++
++
++//  Compare resource types
++int
++mwResCompare(LPCTSTR res1, LPCTSTR res2)
++{
++	if ((HIWORD(res1) == 0xFFFF) || (HIWORD(res2) == 0xFFFF))
++		return (res1 != res2);
++
++	return strcmp(res1, res2);
++}
++
++
++HRSRC
++mwFindMruResource(LPCTSTR resName, LPCTSTR resType)
++{
++	HRSRC obj = mruResources;
++
++	while (obj != NULL) {
++		if (!mwResCompare(obj->name, resName) &&
++		    !mwResCompare(obj->type, resType))
++			break;
++		obj = obj->next;
++	}
++
++	return obj;
++}
++
++/*
++ *  Create application instance
++ */
++HINSTANCE
++mwCreateInstance(int argc, char *argv[])
++{
++	char *p;
++	int i, tot;
++	PMWAPPINSTANCE mwAppInst = (PMWAPPINSTANCE) malloc(sizeof(MWAPPINSTANCE));
++
++	if (mwAppInst == NULL)
++		return NULL;
++
++	for (i = 1, tot = 1; i < argc; i++)
++		tot += 1 + strlen(argv[i]);
++	mwAppInst->szCmdLine = (LPCSTR) malloc(tot);
++	if (mwAppInst->szCmdLine == NULL) {
++		free(mwAppInst);
++		return NULL;
++	}
++
++	strcpy((char *) mwAppInst->szCmdLine, "");
++	p = (char *) mwAppInst->szCmdLine;
++	for (i = 1; i < argc; i++) {
++		if (i > 1)
++			*p++ = ' ';
++		strcpy(p, argv[i]);
++		p += strlen(argv[i]);
++	}
++
++	mwAppInst->szExecCommand = argv[0];
++	mwAppInst->argc = argc;
++	mwAppInst->argv = argv;
++	mwAppInst->szResFilename = (LPCSTR) malloc(5 + strlen(argv[0]));
++	if (mwAppInst->szResFilename == NULL) {
++		free(mwAppInst);
++		return NULL;
++	}
++
++	strcpy((char *) mwAppInst->szResFilename, argv[0]);
++	p = strrchr(mwAppInst->szResFilename, '.');
++	if ((p != NULL) && (p[1] != '/') && (p[1] != '\\'))
++		strcpy(p, ".res");
++	else
++		strcat((char *) mwAppInst->szResFilename, ".res");
++
++	mwAppInst->fResources = fopen(mwAppInst->szResFilename, "rb");
++	return (HINSTANCE) mwAppInst;
++}
++
++
++void
++mwFreeInstance(HINSTANCE hInst)
++{
++	free((void *) ((PMWAPPINSTANCE) hInst)->szExecCommand);
++	free((void *) ((PMWAPPINSTANCE) hInst)->szResFilename);
++	free((void *) ((PMWAPPINSTANCE) hInst));
++}
++
++
++/*
++ *  IMPORTANT NOTE:
++ *  When reading from .res file we read one field a time.
++ *  This prevent alignment problem that some architecture,
++ *  like ARM, may present when reading entire structure
++ *  in one shot.
++ */
++
++/*
++ *  File access functions
++ */
++static BYTE
++resReadByte(FILE * f, BOOL * pEof)
++{
++	int ch = fgetc(f);
++	if (ch == EOF)
++		*pEof = TRUE;
++	return (BYTE) ch;
++}
++
++static WORD
++resReadWord(FILE * f, BOOL * pEof)
++{
++	WORD w;
++
++	if (!fread(&w, 2, 1, f))
++		*pEof = TRUE;
++	return w;
++}
++
++static DWORD
++resReadDWord(FILE * f, BOOL * pEof)
++{
++	DWORD dw;
++
++	if (!fread(&dw, 4, 1, f))
++		*pEof = TRUE;
++	return dw;
++}
++
++static void
++resReadData(FILE * f, void *buffer, int len, BOOL * pEof)
++{
++	if ((fread(buffer, 1, len, f) < len))
++		*pEof = TRUE;
++}
++
++/*
++ *  Allocate a text buffer and read the string from file.
++ */
++static LPTSTR
++resReadText(FILE * f, BOOL * pEof)
++{
++	WORD w;
++	LPSTR txt;
++	int i;
++	int count;
++	long pos = ftell(f);
++
++	count = 1;
++	do {
++		if (!fread(&w, 2, 1, f))
++			*pEof = TRUE;
++		if (w == 0)
++			break;
++		//  check special cases where string init with a FFFF
++		if ((count == 1) && (w == 0xFFFF)) {
++			count = 2;
++			break;
++		}
++		count++;
++	} while (!*pEof);
++
++	if (*pEof)
++		return NULL;
++	fseek(f, pos, SEEK_SET);
++	txt = (LPTSTR) malloc(sizeof(TCHAR) * count);
++	if (txt == NULL)
++		return NULL;
++
++	for (i = 0; i < count; i++)
++		txt[i] = (TCHAR) resReadWord(f, pEof);
++	if (*pEof) {
++		free(txt);
++		return NULL;
++	}
++
++	return txt;
++}
++
++/*
++ *  Check if type (numeric or text) are the same
++ */
++static BOOL
++mwIsSameType(FILE * f, LPCTSTR id, BOOL * pEof)
++{
++	WORD w;
++	int i, n;
++
++	if ((id == NULL)) {
++		w = resReadWord(f, pEof);
++		w = resReadWord(f, pEof);
++		return !(*pEof);
++	}
++	//  Resource may be specified in text or integer
++	if (HIWORD(id) == 0xFFFF) {
++		w = resReadWord(f, pEof);
++		if (w != 0xFFFF)
++			return FALSE;
++		w = resReadWord(f, pEof);
++		if (*pEof)
++			return FALSE;
++		if (w == LOWORD((DWORD) id))
++			return TRUE;
++	} else {
++		LPCTSTR p = id;
++		for (i = 0, n = strlen(p) + 1; (i < n) && !*pEof; i++) {
++			w = resReadWord(f, pEof);
++			if (w != (unsigned) *p)
++				break;
++			p++;
++		}
++		if (!*pEof && (i >= n))
++			return TRUE;
++	}
++
++	return FALSE;
++}
++
++/*
++ *  Search for a resource.
++ *  If found, the file is positioned at the beginning of the resource.
++ */
++FILE *
++mwFindResource(HINSTANCE hInst, LPCTSTR resType, LPCTSTR resName,
++	       PMWRESOURCEHEADER pResHead)
++{
++	FILE *f;
++	PMWAPPINSTANCE pInst = (PMWAPPINSTANCE) hInst;
++	BOOL bEof;
++	BOOL bType, bName;
++	long pos;
++
++	bEof = FALSE;
++
++	do {
++		f = pInst->fResources;
++		if (f == NULL) {
++			EPRINTF("Error opening resource file: %s\n",
++				pInst->szResFilename);
++			break;
++		}
++
++		fseek(f, 0, SEEK_SET);
++
++		while (!feof(f)) {
++			pos = ftell(f);
++			pResHead->DataSize = resReadDWord(f, &bEof);
++			pResHead->HeaderSize = resReadDWord(f, &bEof);
++			if (bEof)
++				break;
++
++			bType = mwIsSameType(f, resType, &bEof);
++			bName = mwIsSameType(f, resName, &bEof);
++			if (bType && bName) {
++				pResHead->DataVersion =
++					resReadDWord(f, &bEof);
++				pResHead->MemoryFlags = resReadWord(f, &bEof);
++				pResHead->LanguageId = resReadWord(f, &bEof);
++				pResHead->Version = resReadDWord(f, &bEof);
++				pResHead->Characteristics =
++					resReadDWord(f, &bEof);
++				if (bEof)
++					break;
++				fseek(f, pos + pResHead->HeaderSize,
++				      SEEK_SET);
++				return f;
++			}
++
++			pos += pResHead->HeaderSize + pResHead->DataSize;
++			//  align to dword
++			while ((pos & 3) != 0)
++				pos++;
++			fseek(f, pos, SEEK_SET);
++		}
++	} while (0);
++
++	return NULL;
++}
++
++
++/*
++ *  Allocate a text string from a template.
++ */
++static LPTSTR
++resAllocText(WORD ** pw)
++{
++	WORD *orgpw = *pw;
++	WORD *ppw = *pw;
++	LPSTR txt;
++	int i;
++	int count;
++
++	count = 0;
++	while (*ppw != 0) {
++		//  check special cases where string init with a FFFF
++		if ((count == 0) && (*ppw == 0xFFFF)) {
++			count = 1;
++			ppw++;
++			break;
++		}
++		ppw++;
++		count++;
++	}
++
++	*pw = ppw + 1;
++	ppw = orgpw;
++	count++;
++	txt = (LPTSTR) malloc(sizeof(TCHAR) * count);
++	if (txt == NULL)
++		return NULL;
++
++	for (i = 0; i < count; i++)
++		txt[i] = (TCHAR) * ppw++;
++	return txt;
++}
++
++
++/*
++ *  get dynamic extra information from a dlg item template
++ */
++PMWDLGITEMTEMPLATE
++resGetDlgItemTemplExtra(PMWDLGITEMTEMPLATE pItem,
++			PMWDLGITEMTEMPLEXTRA pItemExtra)
++{
++	LPWORD pw = (LPWORD) pItem->extraData;
++
++	pItemExtra->szClassName = resAllocText(&pw);
++	pItemExtra->szCaption = resAllocText(&pw);
++	if ((*pw != 0xFFFF) && (*pw != 0x0000))
++		pItemExtra->lpData = (LPWORD) pw;
++	else
++		pItemExtra->lpData = NULL;
++
++	pw += 1 + ((*pw) >> 1);
++	//  dword align
++	if ((((unsigned long) pw) & 2) != 0)
++		pw++;
++	return (PMWDLGITEMTEMPLATE) pw;
++}
++
++/*
++ *  Free allocated resources of MWDLGTEMPLATE
++ */
++void
++resDiscardDlgItemTemplate(PMWDLGITEMTEMPLEXTRA pItemExtra)
++{
++	if (pItemExtra->szClassName)
++		free(pItemExtra->szClassName);
++	if (pItemExtra->szCaption)
++		free(pItemExtra->szCaption);
++}
++
++/*
++ *  get dynamic extra information from a dlg template
++ */
++void
++resGetDlgTemplExtra(PMWDLGTEMPLATE pDlg, PMWDLGTEMPLEXTRA pDlgExtra)
++{
++	PMWDLGITEMTEMPLATE pItem;
++	LPWORD pw = (LPWORD) pDlg->extraData;
++	int i;
++
++	pDlgExtra->szIdMenu = resAllocText(&pw);
++	pDlgExtra->szClassName = resAllocText(&pw);
++	pDlgExtra->szDlgName = resAllocText(&pw);
++	if ((pDlg->style & DS_SETFONT) != 0) {
++		pDlgExtra->fontSize = *pw++;
++		pDlgExtra->szFontName = resAllocText(&pw);
++	} else {
++		pDlgExtra->fontSize = 0;
++		pDlgExtra->szFontName = NULL;
++	}
++	pDlgExtra->pItems = malloc(sizeof(PMWDLGITEMTEMPLATE) * pDlg->cdit);
++	pDlgExtra->pItemsExtra =
++		malloc(sizeof(MWDLGITEMTEMPLEXTRA) * pDlg->cdit);
++	if ((pDlgExtra->pItems == NULL) || (pDlgExtra->pItemsExtra == NULL))
++		return;
++
++	pDlgExtra->nItems = pDlg->cdit;
++	pItem = resFirstDlgItem(pDlg);
++	for (i = 0; i < pDlg->cdit; i++) {
++		pDlgExtra->pItems[i] = pItem;
++		pItem = resGetDlgItemTemplExtra(pItem,
++						pDlgExtra->pItemsExtra + i);
++	}
++}
++
++/*
++ *  Free allocated resources of MWDLGTEMPLATE
++ */
++void
++resDiscardDlgTemplExtra(PMWDLGTEMPLEXTRA pDlgExtra)
++{
++	int i;
++
++	for (i = 0; i < pDlgExtra->nItems; i++)
++		resDiscardDlgItemTemplate(pDlgExtra->pItemsExtra + i);
++
++	if (pDlgExtra->szIdMenu)
++		free(pDlgExtra->szIdMenu);
++	if (pDlgExtra->szClassName)
++		free(pDlgExtra->szClassName);
++	if (pDlgExtra->szDlgName)
++		free(pDlgExtra->szDlgName);
++	if (pDlgExtra->szFontName)
++		free(pDlgExtra->szFontName);
++	if (pDlgExtra->pItems)
++		free(pDlgExtra->pItems);
++	if (pDlgExtra->pItemsExtra)
++		free(pDlgExtra->pItemsExtra);
++}
++
++
++#define RES_SKIP_WSTRING(w)		{\
++	if( *(w) == 0xFFFF ) (w) += 2; \
++	else while ( *(w)++ != 0 );\
++	}
++
++
++/*
++ *  Return pointer to first dlgitem in dlg template
++ */
++PMWDLGITEMTEMPLATE
++resFirstDlgItem(PMWDLGTEMPLATE pDlg)
++{
++	LPWORD pw = (LPWORD) pDlg->extraData;
++
++	//  Skip idMenu, classname, dlgName
++	RES_SKIP_WSTRING(pw);
++	RES_SKIP_WSTRING(pw);
++	RES_SKIP_WSTRING(pw);
++
++	//  check font
++	if ((pDlg->style & DS_SETFONT) != 0) {
++		pw++;		// skip font size
++		RES_SKIP_WSTRING(pw);	// skip font name
++	}
++	//  dword align
++	if ((((unsigned long) pw) & 2) != 0)
++		pw++;
++	return (PMWDLGITEMTEMPLATE) pw;
++}
++
++/*
++ *  Move pointer to next dlgitem in template
++ */
++PMWDLGITEMTEMPLATE
++resNextDlgItem(PMWDLGITEMTEMPLATE pItem)
++{
++	LPWORD pw = (LPWORD) pItem->extraData;
++
++	//  Skip classname, caption
++	RES_SKIP_WSTRING(pw);
++	RES_SKIP_WSTRING(pw);
++	pw += 1 + ((*pw) >> 1);
++	//  dword align
++	if ((((unsigned long) pw) & 2) != 0)
++		pw++;
++	return (PMWDLGITEMTEMPLATE) pw;
++}
++
++
++/***********************  EXPORTED FUNCTIONS  *******************************/
++
++/*
++ *  Find a resource
++ */
++HRSRC WINAPI
++FindResource(HMODULE hModule, LPCTSTR resName, LPCTSTR resType)
++{
++	HRSRC hRes;
++
++	hRes = mwFindMruResource(resName, resType);
++	if (hRes != NULL)
++		return hRes;
++
++	hRes = (HRSRC) malloc(sizeof(MWRSRC));
++	if (hRes == NULL)
++		return NULL;
++
++	hRes->f = mwFindResource(hModule, resType, resName, &hRes->head);
++	if (hRes->f == NULL) {
++		free(hRes);
++		return NULL;
++	}
++
++	hRes->fPos = ftell(hRes->f);
++	hRes->type = resType;
++	hRes->name = resName;
++	hRes->pData = NULL;
++	hRes->cLock = 0;
++
++	//  Add resource to MRU List
++	mwAddResource(hRes);
++	return hRes;
++}
++
++
++/*
++ *  Return the size of a resource
++ */
++DWORD
++SizeofResource(HMODULE hModule, HRSRC hResInfo)
++{
++	return hResInfo->head.DataSize;
++}
++
++
++/*
++ * Load a resource.
++ *
++ * The data will be pointed by hRes->pData.
++ */
++HGLOBAL WINAPI
++LoadResource(HMODULE hModule, HRSRC hRes)
++{
++	if (hRes == NULL)
++		return NULL;
++	hRes->pData = malloc(hRes->head.DataSize);
++	if (hRes->pData == NULL)
++		return NULL;
++
++	fseek(hRes->f, hRes->fPos, SEEK_SET);
++	if (fread(hRes->pData, 1, hRes->head.DataSize, hRes->f) <
++	    hRes->head.DataSize) {
++		free(hRes->pData);
++		return NULL;
++	}
++	return hRes;
++}
++
++
++LPVOID WINAPI
++LockResource(HGLOBAL hObj)
++{
++	((HRSRC) hObj)->cLock++;
++	return ((HRSRC) hObj)->pData;
++}
++
++
++int WINAPI
++UnlockResource(HGLOBAL hObj)
++{
++	if (((HRSRC) hObj)->cLock <= 0)
++		return 0;
++	((HRSRC) hObj)->cLock--;
++	return ((HRSRC) hObj)->cLock;
++}
++
++
++BOOL WINAPI
++FreeResource(HGLOBAL hObj)
++{
++	if (((HRSRC) hObj)->pData == NULL)
++		return FALSE;
++	if (((HRSRC) hObj)->cLock > 0)
++		return FALSE;
++	free(((HRSRC) hObj)->pData);
++	((HRSRC) hObj)->pData = NULL;
++	return TRUE;
++}
++
++/*
++ *  Loads a string from resource table.
++ */
++int WINAPI
++LoadString(HINSTANCE hInstance, UINT uid, LPTSTR lpBuffer, int nMaxBuff)
++{
++	MWRESOURCEHEADER resHead;
++	int blkId = (uid >> 4) + 1;
++	int retV = 0;
++	int i, x, ln;
++	FILE *f;
++	BOOL bEof;
++	WORD w;
++	LPTSTR ptr;
++
++	if ((lpBuffer != NULL) && (nMaxBuff > 0))
++		*lpBuffer = 0;
++	else
++		return 0;
++
++	nMaxBuff--;
++	ptr = lpBuffer;
++
++	f = mwFindResource(hInstance, RT_STRING, MAKEINTRESOURCE(blkId),
++			   &resHead);
++	if (f) {
++		i = (blkId - 1) * 16;
++		bEof = FALSE;
++		while (!bEof && ((UINT) i <= uid)) {
++			ln = (int) resReadWord(f, &bEof);
++			for (x = 0; x < ln; x++) {
++				w = resReadWord(f, &bEof);
++				if (((UINT) i == uid) && (x < nMaxBuff)) {
++					*ptr++ = (TCHAR) w;
++					retV++;
++				}
++			}
++			i++;
++		}
++		*ptr++ = (TCHAR) 0;
++	}
++
++	return retV;
++}
+Index: microwindows-0.91-20090128/src/include/windef.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/windef.h
++++ microwindows-0.91-20090128/src/include/windef.h
+@@ -174,6 +174,7 @@ typedef struct hgdiobj *HRGN;
+ typedef struct hgdiobj *HPALETTE;
+ typedef HANDLE		HICON;
+ typedef HANDLE		HINSTANCE;
++typedef HANDLE		HMODULE;
+ typedef HANDLE		HMENU;
+ 
+ /* moved to winuser.h for resource compiler*/
+Index: microwindows-0.91-20090128/src/mwin/Makefile
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/Makefile
++++ microwindows-0.91-20090128/src/mwin/Makefile
+@@ -35,6 +35,7 @@ OBJS := \
+ 	$(MW_DIR_OBJ)/mwin/winevent.o \
+ 	$(MW_DIR_OBJ)/mwin/windefw.o \
+ 	$(MW_DIR_OBJ)/mwin/winrgn.o \
++	$(MW_DIR_OBJ)/mwin/winres.o \
+ 	$(MW_DIR_OBJ)/mwin/winfont.o \
+ 	$(MW_DIR_OBJ)/mwin/winsbar.o
+ 
+Index: microwindows-0.91-20090128/src/include/winfont.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/winfont.h
++++ microwindows-0.91-20090128/src/include/winfont.h
+@@ -154,3 +154,13 @@ HFONT WINAPI CreateFont(int nHeight, int
+ 		DWORD fdwOutputPrecision,DWORD fdwClipPrecision,
+ 		DWORD fdwQuality, DWORD fdwPitchAndFamily, LPCSTR lpszFace);
+ HFONT WINAPI CreateFontIndirect(CONST LOGFONT *lplf);
++
++
++/*
++ * Font enumeration functions
++ */
++typedef int CALLBACK (*FONTENUMPROC) ( CONST LOGFONT *lplf,
++		CONST TEXTMETRIC *lptm, DWORD dwType, LPARAM lpData );
++
++int WINAPI EnumFonts ( HDC hdc, LPCTSTR lpFaceName, FONTENUMPROC lpFontFunc,
++		       LPARAM lParam );
+Index: microwindows-0.91-20090128/src/engine/devfont.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devfont.c
++++ microwindows-0.91-20090128/src/engine/devfont.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2000, 2002, 2003 Greg Haerr <greg@censoft.com>
++ * Copyright (c) 2000, 2002, 2003, 2005 Greg Haerr <greg@censoft.com>
+  * Portions Copyright (c) 2002 by Koninklijke Philips Electronics N.V.
+  */
+ /**
+@@ -19,6 +19,9 @@
+ #include "device.h"
+ #include "devfont.h"
+ #include "../drivers/genfont.h"
++#include "intl.h"
++
++//#define DEBUG_TEXT_SHAPING
+ 
+ /**
+  * The current font.
+@@ -29,11 +32,14 @@ static PMWFONT	gr_pfont;
+ extern MWPIXELVAL gr_foreground;
+ extern MWPIXELVAL gr_background;
+ extern MWBOOL gr_usebg;
++extern MWCOREFONT *user_builtin_fonts;
+ 
+ void corefont_drawtext(PMWFONT pfont, PSD psd, MWCOORD x, MWCOORD y,
+ 		const void *text, int cc, MWTEXTFLAGS flags);
+-static int  utf8_to_utf16(const unsigned char *utf8, int cc,
++static int utf8_to_utf16(const unsigned char *utf8, int cc,
+ 		unsigned short *unicode16);
++static int uc16_to_utf8(const unsigned short *us, int cc, char *s);
++
+ 
+ /**
+  * Set the font for future calls.
+@@ -55,7 +61,7 @@ GdSetFont(PMWFONT pfont)
+  * Select a font, based on various parameters.
+  * If plogfont is specified, name and height parms are ignored
+  * and instead used from MWLOGFONT.
+- * 
++ *
+  * If height is 0, match based on passed name, trying
+  * builtins first for speed, then other font renderers.
+  * If not found, return 0.  If height=0 is used for
+@@ -85,6 +91,7 @@ GdCreateFont(PSD psd, const char *name,
+ 	int		fontattr = 0;
+ 	PMWFONT		pfont;
+ 	PMWCOREFONT	pf = psd->builtin_fonts;
++	PMWCOREFONT	upf;
+ 	MWFONTINFO	fontinfo;
+ 	MWSCREENINFO 	scrinfo;
+ 	const char *	fontname;
+@@ -130,11 +137,11 @@ GdCreateFont(PSD psd, const char *name,
+  			if(!strcmpi(pf[i].name, fontname)) {
+   				pf[i].fontsize = pf[i].cfont->height;
+ 				pf[i].fontattr = fontattr;
+-DPRINTF("createfont: (height == 0) found builtin font %s (%d)\n", fontname, i);
++				DPRINTF("createfont: (height == 0) found builtin font %s (%d)\n", fontname, i);
+   				return (PMWFONT)&pf[i];
+   			}
+   		}
+-		/* 
++		/*
+ 		 * Specified height=0 and no builtin font matched name.
+ 		 * if not font found with other renderer, no font
+ 		 * will be loaded, and 0 returned.
+@@ -146,9 +153,23 @@ DPRINTF("createfont: (height == 0) found
+ 		 */
+   	}
+ 
++	/* check user builtin fonts next*/
++	upf = user_builtin_fonts;
++	while ( (upf != NULL) && (upf->name != NULL) ) {
++		if(!strcmpi(upf->name, fontname) && (upf->cfont->height == height) ) {
++			if( upf->fontprocs == NULL )
++				gen_setfontproc(upf);
++			upf->fontsize = upf->cfont->height;
++			upf->fontattr = fontattr;
++			DPRINTF("createfont: (height != 0) found user builtin font %s (%d)\n", fontname, height);
++			return (PMWFONT)upf;
++		}
++		upf++;
++	}
++
+ 	/* try to load font (regardless of height) using other renderers*/
+ 
+-#ifdef HAVE_FNT_SUPPORT
++#if HAVE_FNT_SUPPORT
+ 	if (fontclass == MWLF_CLASS_ANY || fontclass == MWLF_CLASS_FNT) {
+ 		pfont = (PMWFONT) fnt_createfont(fontname, height, fontattr);
+ 		if (pfont) {
+@@ -159,7 +180,7 @@ DPRINTF("createfont: (height == 0) found
+ 	}
+ #endif
+ 
+-#ifdef HAVE_PCF_SUPPORT
++#if HAVE_PCF_SUPPORT
+ 	if (fontclass == MWLF_CLASS_ANY || fontclass == MWLF_CLASS_PCF) {
+ 		pfont = (PMWFONT) pcf_createfont(fontname, height, fontattr);
+ 		if (pfont) {
+@@ -173,8 +194,7 @@ DPRINTF("createfont: (height == 0) found
+ #if HAVE_FREETYPE_SUPPORT
+  	if (fontclass == MWLF_CLASS_ANY || fontclass == MWLF_CLASS_FREETYPE) {
+ 		if (freetype_init(psd)) {
+-			/* FIXME auto antialias for height > 14 for kaffe*/
+-			if (plogfont && plogfont->lfHeight > 14 &&
++			if (plogfont && abs(plogfont->lfHeight) > FFMINAA_HEIGHT &&
+ 				plogfont->lfQuality)
+ 					fontattr |= MWTF_ANTIALIAS;
+ 
+@@ -230,7 +250,7 @@ DPRINTF("createfont: (height == 0) found
+ 		/* Make sure the library is initialized */
+ 		if (hzk_init(psd)) {
+ 			pfont = (PMWFONT)hzk_createfont(fontname, height, fontattr);
+-			if(pfont)		
++			if(pfont)
+ 				return pfont;
+ 			EPRINTF("hzk_createfont: %s,%d not found\n", fontname, height);
+ 		}
+@@ -260,7 +280,7 @@ DPRINTF("createfont: (height == 0) found
+ 		for(i = 0; i < scrinfo.fonts; ++i) {
+ 			pfont = (PMWFONT)&pf[i];
+ 			GdGetFontInfo(pfont, &fontinfo);
+-			if(fontht > abs(height-fontinfo.height)) { 
++			if(fontht > abs(height-fontinfo.height)) {
+ 				fontno = i;
+ 				fontht = abs(height-fontinfo.height);
+ 			}
+@@ -310,7 +330,7 @@ GdSetFontRotation(PMWFONT pfont, int ten
+ 
+ 	if (pfont->fontprocs->SetFontRotation)
+ 	    pfont->fontprocs->SetFontRotation(pfont, tenthdegrees);
+-	
++
+ 	return oldrotation;
+ }
+ 
+@@ -333,7 +353,7 @@ GdSetFontAttr(PMWFONT pfont, int setflag
+ 
+ 	if (pfont->fontprocs->SetFontAttr)
+ 	    pfont->fontprocs->SetFontAttr(pfont, setflags, clrflags);
+-	
++
+ 	return oldattr;
+ }
+ 
+@@ -456,7 +476,7 @@ corefont_drawtext(PMWFONT pfont, PSD psd
+ 	if (flags & MWTF_DBCSMASK)
+ 		dbcs_gettextsize(pfont, istr, cc, flags, &width, &height, &base);
+ 	else pfont->fontprocs->GetTextSize(pfont, str, cc, flags, &width, &height, &base);
+-	
++
+ 	if (flags & MWTF_BASELINE)
+ 		y -= base;
+ 	else if (flags & MWTF_BOTTOM)
+@@ -624,7 +644,7 @@ alphablend(PSD psd, OUTPIXELVAL *out, MW
+ 		*out++ = dst;
+ 	    else if(a == 255)
+ 		*out++ = src;
+-	    else 
++	    else
+ 		switch(psd->pixtype) {
+ 	        case MWPF_TRUECOLOR0888:
+ 	        case MWPF_TRUECOLOR888:
+@@ -667,6 +687,16 @@ alphablend(PSD psd, OUTPIXELVAL *out, MW
+ 		    *out++ = (r << 5) | (g << 2) | b;
+ 		    break;
+ 
++	        case MWPF_TRUECOLOR233:
++		    d = BITS(dst, 0, 0x07);
++		    r = (unsigned char)(((BITS(src, 0, 0x07) - d)*a)>>8) + d;
++		    d = BITS(dst, 3, 0x07);
++		    g = (unsigned char)(((BITS(src, 3, 0x07) - d)*a)>>8) + d;
++		    d = BITS(dst, 6, 0x03);
++		    b = (unsigned char)(((BITS(src, 6, 0x03) - d)*a)>>8) + d;
++		    *out++ = (r << 0) | (g << 3) | (b << 6);
++		    break;
++
+ 	        case MWPF_PALETTE:
+ 		    /* reverse lookup palette entry for blend ;-)*/
+ 		    palsrc = GETPALENTRY(gr_palette, src);
+@@ -844,6 +874,9 @@ GdConvertEncoding(const void *istr, MWTE
+ 		default:
+ 			*ostr8++ = (unsigned char)ch;
+ 			break;
++		case MWTF_UTF8:
++			ostr8 += uc16_to_utf8 ( (unsigned short*)&ch, 1, ostr8 );
++			break;
+ 		case MWTF_UC16:
+ 			*ostr16++ = (unsigned short)ch;
+ 			break;
+@@ -898,6 +931,7 @@ GdGetTextSize(PMWFONT pfont, const void
+ 
+ 	/* convert encoding if required*/
+ 	if((flags & (MWTF_PACKMASK|MWTF_DBCSMASK)) != defencoding) {
++		/*FIXME: if buf is not big enough, buf overflow may cause exceptions!!!!*/
+ 		cc = GdConvertEncoding(str, flags, cc, buf, defencoding);
+ 		flags &= ~MWTF_PACKMASK; /* keep DBCS bits for gettextsize*/
+ 		flags |= defencoding;
+@@ -1096,3 +1130,670 @@ utf8_to_utf16(const unsigned char *utf8,
+ 	}
+ 	return count;
+ }
++
++/*
++ * warning: the length of output string may exceed six x the length of the input
++ */
++static int
++uc16_to_utf8(const unsigned short *us, int cc, char *s)
++{
++	int i;
++	char *t = s;
++
++	for (i = 0; i < cc; i++) {
++		unsigned short uc16 = us[i];
++		if (uc16 <= 0x7F) {
++			*t++ = (char) uc16;
++		} else if (uc16 <= 0x7FF) {
++			*t++ = 0xC0 | (unsigned char) ((uc16 >> 6) & 0x1F); /* upper 5 bits */
++			*t++ = 0x80 | (unsigned char) (uc16 & 0x3F);        /* lower 6 bits */
++		} else {
++			*t++ = 0xE0 | (unsigned char) ((uc16 >> 12) & 0x0F);/* upper 4 bits */
++			*t++ = 0x80 | (unsigned char) ((uc16 >> 6) & 0x3F); /* next 6 bits */
++			*t++ = 0x80 | (unsigned char) (uc16 & 0x3F);        /* lowest 6 bits */
++		}
++	}
++	*t = 0;
++	return (t - s);
++}
++
++/*
++   UTF8 utility:
++   This map return the expected count of bytes based on the first char
++ */
++const char utf8_len_map[256] = {
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
++  2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,
++  3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,4,4,4,4,4,4,5,5,5,5,6,6,1,1
++};
++
++
++#ifdef DEBUG_TEXT_SHAPING
++/*
++ *  Return the number of character (not byte) of UTF-8 string
++ */
++int utf8_nchar ( const char *str )
++{
++	int n = 0;
++	int al = strlen ( str );
++	while ( n < al ) n += utf8_len_map[(unsigned char)str[n]];
++	return (n < al) ? n : al;
++}
++
++static void	dumpUtf8 ( const char *str, int sz )
++{
++	int i, n;
++	unsigned short uc16;
++	const char *last = str+sz;
++	printf ( "UTF-8 dump:\n" );
++	while ( str < last ) {
++		for ( i=0, n=utf8_len_map[(unsigned char)str[0]]; i < n; i++ ) printf ( "%02X", (unsigned char)str[i] );
++		utf8_to_utf16 ( str, n, &uc16 );
++		printf ( ": %04X\n", uc16 );
++		str += n;
++	}
++}
++#endif
++
++#if HAVE_SHAPEJOINING_SUPPORT
++typedef struct char_shaped {
++	unsigned short isolated;
++	unsigned short initial;
++	unsigned short medial;
++	unsigned short final;
++} chr_shpjoin_t;
++
++/* This table start from a base of 0x0621, up to 0x06D3 */
++
++#define SHAPED_TABLE_START	0x0621
++#define SHAPED_TABLE_TOP	0x06D3
++
++static const chr_shpjoin_t shaped_table[] =
++{
++	/*  base       s       i       m       f */
++	{ /*0x0621*/ 0xFE80, 0x0000, 0x0000, 0x0000, },  /* HAMZA */
++	{ /*0x0622*/ 0xFE81, 0x0000, 0x0000, 0xFE82, },  /* ALEF_MADDA */
++	{ /*0x0623*/ 0xFE83, 0x0000, 0x0000, 0xFE84, },  /* ALEF_HAMZA_ABOVE */
++	{ /*0x0624*/ 0xFE85, 0x0000, 0x0000, 0xFE86, },  /* WAW_HAMZA */
++	{ /*0x0625*/ 0xFE87, 0x0000, 0x0000, 0xFE88, },  /* ALEF_HAMZA_BELOW */
++	{ /*0x0626*/ 0xFE89, 0xFE8B, 0xFE8C, 0xFE8A, },  /* YEH_HAMZA */
++	{ /*0x0627*/ 0xFE8D, 0x0000, 0x0000, 0xFE8E, },  /* ALEF */
++	{ /*0x0628*/ 0xFE8F, 0xFE91, 0xFE92, 0xFE90, },  /* BEH */
++	{ /*0x0629*/ 0xFE93, 0x0000, 0x0000, 0xFE94, },  /* TEH_MARBUTA */
++	{ /*0x062A*/ 0xFE95, 0xFE97, 0xFE98, 0xFE96, },  /* TEH */
++	{ /*0x062B*/ 0xFE99, 0xFE9B, 0xFE9C, 0xFE9A, },  /* THEH */
++	{ /*0x062C*/ 0xFE9D, 0xFE9F, 0xFEA0, 0xFE9E, },  /* JEEM */
++	{ /*0x062D*/ 0xFEA1, 0xFEA3, 0xFEA4, 0xFEA2, },  /* HAH */
++	{ /*0x062E*/ 0xFEA5, 0xFEA7, 0xFEA8, 0xFEA6, },  /* KHAH */
++	{ /*0x062F*/ 0xFEA9, 0x0000, 0x0000, 0xFEAA, },  /* DAL */
++	{ /*0x0630*/ 0xFEAB, 0x0000, 0x0000, 0xFEAC, },  /* THAL */
++	{ /*0x0631*/ 0xFEAD, 0x0000, 0x0000, 0xFEAE, },  /* REH */
++	{ /*0x0632*/ 0xFEAF, 0x0000, 0x0000, 0xFEB0, },  /* ZAIN */
++	{ /*0x0633*/ 0xFEB1, 0xFEB3, 0xFEB4, 0xFEB2, },  /* SEEN */
++	{ /*0x0634*/ 0xFEB5, 0xFEB7, 0xFEB8, 0xFEB6, },  /* SHEEN */
++	{ /*0x0635*/ 0xFEB9, 0xFEBB, 0xFEBC, 0xFEBA, },  /* SAD */
++	{ /*0x0636*/ 0xFEBD, 0xFEBF, 0xFEC0, 0xFEBE, },  /* DAD */
++	{ /*0x0637*/ 0xFEC1, 0xFEC3, 0xFEC4, 0xFEC2, },  /* TAH */
++	{ /*0x0638*/ 0xFEC5, 0xFEC7, 0xFEC8, 0xFEC6, },  /* ZAH */
++	{ /*0x0639*/ 0xFEC9, 0xFECB, 0xFECC, 0xFECA, },  /* AIN */
++	{ /*0x063A*/ 0xFECD, 0xFECF, 0xFED0, 0xFECE, },  /* GHAIN */
++	{ /*0x063B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x063C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x063D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x063E*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x063F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0640*/ 0x0640, 0x0640, 0x0640, 0x0640, },  /* TATWEEL */
++	{ /*0x0641*/ 0xFED1, 0xFED3, 0xFED4, 0xFED2, },  /* FEH */
++	{ /*0x0642*/ 0xFED5, 0xFED7, 0xFED8, 0xFED6, },  /* QAF */
++	{ /*0x0643*/ 0xFED9, 0xFEDB, 0xFEDC, 0xFEDA, },  /* KAF */
++	{ /*0x0644*/ 0xFEDD, 0xFEDF, 0xFEE0, 0xFEDE, },  /* LAM */
++	{ /*0x0645*/ 0xFEE1, 0xFEE3, 0xFEE4, 0xFEE2, },  /* MEEM */
++	{ /*0x0646*/ 0xFEE5, 0xFEE7, 0xFEE8, 0xFEE6, },  /* NOON */
++	{ /*0x0647*/ 0xFEE9, 0xFEEB, 0xFEEC, 0xFEEA, },  /* HEH */
++	{ /*0x0648*/ 0xFEED, 0x0000, 0x0000, 0xFEEE, },  /* WAW */
++	{ /*0x0649*/ 0xFEEF, 0xFBE8, 0xFBE9, 0xFEF0, },  /* ALEF_MAKSURA */
++	{ /*0x064A*/ 0xFEF1, 0xFEF3, 0xFEF4, 0xFEF2, },  /* YEH */
++	{ /*0x064B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x064C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x064D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x064E*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x064F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0650*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0651*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0652*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0653*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0654*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0655*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0656*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0657*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0658*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0659*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065A*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065E*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x065F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0660*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0661*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0662*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0663*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0664*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0665*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0666*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0667*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0668*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0669*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066A*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066E*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x066F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0670*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0671*/ 0xFB50, 0x0000, 0x0000, 0xFB51, },
++	{ /*0x0672*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0673*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0674*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0675*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0676*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0677*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0678*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0679*/ 0xFB66, 0xFB68, 0xFB69, 0xFB67, },
++	{ /*0x067A*/ 0xFB5E, 0xFB60, 0xFB61, 0xFB5F, },
++	{ /*0x067B*/ 0xFB52, 0xFB54, 0xFB55, 0xFB53, },
++	{ /*0x067C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x067D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x067E*/ 0xFB56, 0xFB58, 0xFB59, 0xFB57, },
++	{ /*0x067F*/ 0xFB62, 0xFB64, 0xFB65, 0xFB63, },
++	{ /*0x0680*/ 0xFB5A, 0xFB5C, 0xFB5D, 0xFB5B, },
++	{ /*0x0681*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0682*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0683*/ 0xFB76, 0xFB78, 0xFB79, 0xFB77, },
++	{ /*0x0684*/ 0xFB72, 0xFB74, 0xFB75, 0xFB73, },
++	{ /*0x0685*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0686*/ 0xFB7A, 0xFB7C, 0xFB7D, 0xFB7B, },
++	{ /*0x0687*/ 0xFB7E, 0xFB80, 0xFB81, 0xFB7F, },
++	{ /*0x0688*/ 0xFB88, 0x0000, 0x0000, 0xFB89, },
++	{ /*0x0689*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x068A*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x068B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x068C*/ 0xFB84, 0x0000, 0x0000, 0xFB85, },
++	{ /*0x068D*/ 0xFB82, 0x0000, 0x0000, 0xFB83, },
++	{ /*0x068E*/ 0xFB86, 0x0000, 0x0000, 0xFB87, },
++	{ /*0x068F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0690*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0691*/ 0xFB8C, 0x0000, 0x0000, 0xFB8D, },
++	{ /*0x0692*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0693*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0694*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0695*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0696*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0697*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x0698*/ 0xFB8A, 0x0000, 0x0000, 0xFB8B, },
++	{ /*0x0699*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069A*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069B*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069C*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069D*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069E*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x069F*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A0*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A1*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A2*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A3*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A4*/ 0xFB6A, 0xFB6C, 0xFB6D, 0xFB6B, },
++	{ /*0x06A5*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A6*/ 0xFB6E, 0xFB70, 0xFB71, 0xFB6F, },
++	{ /*0x06A7*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A8*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06A9*/ 0xFB8E, 0xFB90, 0xFB91, 0xFB8F, },
++	{ /*0x06AA*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06AB*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06AC*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06AD*/ 0xFBD3, 0xFBD5, 0xFBD6, 0xFBD4, },
++	{ /*0x06AE*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06AF*/ 0xFB92, 0xFB94, 0xFB95, 0xFB93, },
++	{ /*0x06B0*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B1*/ 0xFB9A, 0xFB9C, 0xFB9D, 0xFB9B, },
++	{ /*0x06B2*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B3*/ 0xFB96, 0xFB98, 0xFB99, 0xFB97, },
++	{ /*0x06B4*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B5*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B6*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B7*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B8*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06B9*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06BA*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06BB*/ 0xFBA0, 0xFBA2, 0xFBA3, 0xFBA1, },
++	{ /*0x06BC*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06BD*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06BE*/ 0xFBAA, 0xFBAC, 0xFBAD, 0xFBAB, },
++	{ /*0x06BF*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06C0*/ 0xFBA4, 0x0000, 0x0000, 0xFBA5, },
++	{ /*0x06C1*/ 0xFBA6, 0xFBA8, 0xFBA9, 0xFBA7, },
++	{ /*0x06C2*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06C3*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06C4*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06C5*/ 0xFBE0, 0x0000, 0x0000, 0xFBE1, },
++	{ /*0x06C6*/ 0xFBD9, 0x0000, 0x0000, 0xFBDA, },
++	{ /*0x06C7*/ 0xFBD7, 0x0000, 0x0000, 0xFBD8, },
++	{ /*0x06C8*/ 0xFBDB, 0x0000, 0x0000, 0xFBDC, },
++	{ /*0x06C9*/ 0xFBE2, 0x0000, 0x0000, 0xFBE3, },
++	{ /*0x06CA*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06CB*/ 0xFBDE, 0x0000, 0x0000, 0xFBDF, },
++	{ /*0x06CC*/ 0xFBFC, 0xFBFE, 0xFBFF, 0xFBFD, },
++	{ /*0x06CD*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06CE*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06CF*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06D0*/ 0xFBE4, 0xFBE6, 0xFBE7, 0xFBE5, },
++	{ /*0x06D1*/ 0x0000, 0x0000, 0x0000, 0x0000, },  /* dummy filler */
++	{ /*0x06D2*/ 0xFBAE, 0x0000, 0x0000, 0xFBAF, },
++	{ /*0x06D3*/ 0xFBB0, 0x0000, 0x0000, 0xFBB1, },
++};
++
++#define SHAPED_TABLE2_START	0xFEF5
++#define SHAPED_TABLE2_TOP	0xFEFB
++
++/*
++ * The second table is for special ligatures
++ */
++static const chr_shpjoin_t shaped_table2[] =
++{
++	{ /*0xFEF5*/ 0xFEF5, 0x0000, 0x0000, 0xFEF6, }, /* LAM_ALEF_MADDA */
++	{ /*0xFEF6*/ 0x0000, 0x0000, 0x0000, 0x0000, }, /* dummy filler */
++	{ /*0xFEF7*/ 0xFEF7, 0x0000, 0x0000, 0xFEF8, }, /* LAM_ALEF_HAMZA_ABOVE */
++	{ /*0xFEF8*/ 0x0000, 0x0000, 0x0000, 0x0000, }, /* dummy filler */
++	{ /*0xFEF9*/ 0xFEF9, 0x0000, 0x0000, 0xFEFA, }, /* LAM_ALEF_HAMZA_BELOW */
++	{ /*0xFEFA*/ 0x0000, 0x0000, 0x0000, 0x0000, }, /* dummy filler */
++	{ /*0xFEFB*/ 0xFEFB, 0x0000, 0x0000, 0xFEFC, }, /* LAM_ALEF */
++};
++
++#define assignShape(chr)	( ((chr) >= SHAPED_TABLE_START  && (chr) <= SHAPED_TABLE_TOP)? \
++				    &shaped_table[(chr)-SHAPED_TABLE_START] : \
++                                  ((chr) >= SHAPED_TABLE2_START && (chr) <= SHAPED_TABLE2_TOP)? \
++				    &shaped_table2[(chr)-SHAPED_TABLE2_START] : NULL)
++
++#define assignShapeUtf(txt, i) ( (utf8_len_map[(unsigned char)((txt)[(i)])] > 1)? \
++					doAssignShapeUtf((txt)+(i)) : NULL)
++
++static const chr_shpjoin_t *
++doAssignShapeUtf(const char *txt)
++{
++	unsigned short fs;
++
++	utf8_to_utf16((const unsigned char *) txt,
++		      utf8_len_map[(unsigned char) txt[0]], &fs);
++	return assignShape(fs);
++}
++
++
++static void
++storeUc_2_Utf8(char *dest, int *psz, unsigned short wch)
++{
++	int cb = uc16_to_utf8(&wch, 1, dest + (*psz));
++
++	*psz = *psz + cb;
++}
++
++
++static void
++store_Utf8(char *dest, int *psz, const char *txt)
++{
++	int cb = utf8_len_map[(unsigned char) txt[0]];
++
++	memcpy(dest + (*psz), txt, cb);
++	*psz = *psz + cb;
++}
++
++/*
++ * Note that text is currently left to right
++ */
++static unsigned short *
++arabicJoin_UC16(const unsigned short *text, int len, unsigned long *pAttrib)
++{
++	int i;
++	unsigned short *new_str;
++	const chr_shpjoin_t *prev = NULL;
++	const chr_shpjoin_t *curr = NULL;
++	const chr_shpjoin_t *next = NULL;
++	unsigned long attrib = 0;
++
++	new_str = (unsigned short *) malloc((1 + len) * sizeof(unsigned short));
++	if (new_str == NULL)
++		return NULL;
++
++	for (i = 0; i < len; i++) {
++		if ((curr = assignShape(text[i])) != NULL) {
++			if (i < len - 1)
++				next = assignShape(text[i + 1]);
++			else
++				next = NULL;
++			if (next) {
++				if (prev) {
++					if (!prev->initial || !prev->medial)
++						new_str[i] = curr->initial ?
++							curr->initial : curr->isolated;
++					else
++						new_str[i] = curr->medial ?
++							curr->medial : curr->final;
++				} else {
++					new_str[i] = curr->initial ?
++						curr->initial : curr->isolated;
++				}
++			} else {
++				if (prev) {
++					if (!prev->initial || !prev->medial)
++						new_str[i] = curr->isolated;
++					else
++						new_str[i] = curr->final ?
++							curr->final : curr->isolated;
++				} else {
++					new_str[i] = curr->isolated;
++				}
++			}
++			attrib |= (TEXTIP_SHAPED | TEXTIP_EXTENDED);
++		} else {
++			new_str[i] = text[i];
++			if (text[i] <= 0xFF)
++				attrib |= TEXTIP_STANDARD;
++			else
++				attrib |= TEXTIP_EXTENDED;
++		}
++
++		prev = curr;
++	}
++	new_str[i] = 0;
++	if (pAttrib)
++		*pAttrib = attrib;
++	return new_str;
++}
++
++/*
++ * Note that text is currently left to right
++ */
++char *
++arabicJoin_UTF8(const char *text, int len, int *pNewLen,
++		unsigned long *pAttrib)
++{
++	int i, sz;
++	char *new_str;
++	const chr_shpjoin_t *prev = NULL;
++	const chr_shpjoin_t *curr = NULL;
++	const chr_shpjoin_t *next = NULL;
++	unsigned long attrib = 0;
++
++	/* Note that shaping may result in three UTF-8 bytes, due to 06xx -> FBxx translation*/
++	/* two times the original buffer should be enough...*/
++	new_str = (char *) malloc((1 + 2 * len) * sizeof(char));
++	if (new_str == NULL)
++		return NULL;
++
++	sz = 0;
++
++	for (i = 0; i < len;) {
++		int b = utf8_len_map[(unsigned char) text[i]];
++		if ((curr = assignShapeUtf(text, i)) != NULL) {
++			if (i < len - b)
++				next = assignShapeUtf(text, i + b);
++			else
++				next = NULL;
++			if (next) {
++				if (prev) {
++					if (!prev->initial || !prev->medial)
++						storeUc_2_Utf8(new_str, &sz,
++							       (curr->initial ? curr->initial :
++								curr->isolated));
++					else
++						storeUc_2_Utf8(new_str, &sz,
++							       (curr->medial ? curr->medial :
++								curr->final));
++				} else {
++					storeUc_2_Utf8(new_str, &sz, (curr->initial ?
++							curr->initial : curr-> isolated));
++				}
++			} else {
++				if (prev) {
++					if (!prev->initial || !prev->medial)
++						storeUc_2_Utf8(new_str, &sz, curr->isolated);
++					else
++						storeUc_2_Utf8(new_str, &sz,
++							       (curr->final ? curr->final :
++							       curr->isolated));
++				} else {
++					storeUc_2_Utf8(new_str, &sz, curr->isolated);
++				}
++			}
++			attrib |= (TEXTIP_SHAPED | TEXTIP_EXTENDED);
++		} else {
++			store_Utf8(new_str, &sz, text + i);
++			if ((unsigned char) text[i] < 0xC0)
++				attrib |= TEXTIP_STANDARD;
++			else
++				attrib |= TEXTIP_EXTENDED;
++		}
++
++		i += b;
++		prev = curr;
++	}
++	new_str[sz] = 0;
++	if (pNewLen)
++		*pNewLen = sz;
++	if (pAttrib)
++		*pAttrib = attrib;
++#ifdef DEBUG_TEXT_SHAPING
++	if (strcmp(new_str, text))
++		dumpUtf8(new_str, sz);
++#endif
++	return new_str;
++}
++
++unsigned short *
++doCharShape_UC16(const unsigned short *text, int len, int *pNewLen,
++	unsigned long *pAttrib)
++{
++	unsigned short *conv = arabicJoin_UC16(text, len, pAttrib);
++
++	if (pNewLen)
++		*pNewLen = len;
++	return conv;
++}
++
++char *
++doCharShape_UTF8(const char *text, int len, int *pNewLen, unsigned long *pAttrib)
++{
++	return arabicJoin_UTF8(text, len, pNewLen, pAttrib);
++}
++
++#else /* HAVE_SHAPEJOINING_SUPPORT */
++/* DUMMY FUNCTIONS */
++unsigned short *
++doCharShape_UC16(const unsigned short *text, int len, int *pNewLen,
++	unsigned long *pAttrib)
++{
++	unsigned short *conv = malloc((len + 1) * sizeof(unsigned short));
++
++	if (conv == NULL)
++		return NULL;
++	memcpy(conv, text, len * sizeof(unsigned short));
++	conv[len] = 0;
++	if (pNewLen)
++		*pNewLen = len;
++	if (pAttrib)
++		*pAttrib = 0;
++	return conv;
++}
++
++char *
++doCharShape_UTF8(const char *text, int len, int *pNewLen, unsigned long *pAttrib)
++{
++	char *conv = malloc((len + 1) * sizeof(char));
++
++	if (conv == NULL)
++		return NULL;
++	memcpy(conv, text, len * sizeof(char));
++	conv[len] = 0;
++	if (pNewLen)
++		*pNewLen = len;
++	if (pAttrib)
++		*pAttrib = 0;
++	return conv;
++}
++#endif /* HAVE_SHAPEJOINING_SUPPORT */
++
++
++#if HAVE_FRIBIDI_SUPPORT
++#include <fribidi/fribidi.h>
++
++char *
++doCharBidi_UTF8(const char *text, int len, int *v2lPos, char *pDirection,
++	unsigned long *pAttrib)
++{
++	FriBidiChar *ftxt, *fvirt;
++	FriBidiChar localBuff[128];
++	FriBidiCharType basedir;
++	int cc;
++	int isLocal = 0;
++	char *new_str;
++	int new_len;
++
++	new_str = (char *) malloc(len + 1);
++	if (new_str == NULL)
++		return NULL;
++
++	/* len may be greather than real char count, but it's ok.
++	   if will fit in localBuff, we use it to improve speed */
++	if (len < sizeof(localBuff) / sizeof(localBuff[0]) / 2) {
++		ftxt = localBuff;
++		fvirt = localBuff +
++			sizeof(localBuff) / sizeof(localBuff[0]) / 2;
++		isLocal = 1;
++	} else {
++		ftxt = (FriBidiChar *) malloc((len + 1) * sizeof(FriBidiChar));
++		fvirt = (FriBidiChar *) malloc((len + 1) * sizeof(FriBidiChar));
++	}
++
++	if (ftxt == NULL)
++		return NULL;
++	if (fvirt == NULL) {
++		free(ftxt);
++		return NULL;
++	}
++
++	cc = fribidi_utf8_to_unicode((char *) text, len, ftxt);
++	basedir = FRIBIDI_TYPE_N;
++	fribidi_log2vis(ftxt, cc, &basedir, fvirt, v2lPos, NULL, pDirection);
++	new_len = fribidi_unicode_to_utf8(fvirt, cc, new_str);
++
++	if (pAttrib) {
++		if (basedir & FRIBIDI_MASK_RTL)
++			*pAttrib |= TEXTIP_RTOL;
++	}
++
++	if (!isLocal) {
++		free(fvirt);
++		free(ftxt);
++	}
++	new_str[new_len] = 0;
++	return new_str;
++}
++
++
++unsigned short *
++doCharBidi_UC16(const unsigned short *text, int len, int *v2lPos,
++	char *pDirection, unsigned long *pAttrib)
++{
++	FriBidiChar *ftxt, *fvirt;
++	FriBidiChar localBuff[128];
++	FriBidiCharType basedir;
++	int cc;
++	int isLocal = 0;
++	unsigned short *new_str;
++
++	new_str = (unsigned short *) malloc((len + 1) * sizeof(unsigned short));
++	if (new_str == NULL)
++		return NULL;
++
++	/* len may be greather than real char count, but it's ok.
++	   if will fit in localBuff, we use it to improve speed */
++	if (len < sizeof(localBuff) / sizeof(localBuff[0]) / 2) {
++		ftxt = localBuff;
++		fvirt = localBuff +
++			sizeof(localBuff) / sizeof(localBuff[0]) / 2;
++		isLocal = 1;
++	} else {
++		ftxt = (FriBidiChar *) malloc((len + 1) * sizeof(FriBidiChar));
++		fvirt = (FriBidiChar *) malloc((len + 1) * sizeof(FriBidiChar));
++	}
++
++	if (ftxt == NULL)
++		return NULL;
++	if (fvirt == NULL) {
++		free(ftxt);
++		return NULL;
++	}
++
++	for (cc = 0; cc < len; cc++)
++		ftxt[cc] = text[cc];
++	basedir = FRIBIDI_TYPE_N;
++	fribidi_log2vis(ftxt, cc, &basedir, fvirt, v2lPos, NULL, pDirection);
++	for (cc = 0; cc < len; cc++)
++		new_str[cc] = (unsigned short) fvirt[cc];
++	new_str[cc] = 0;
++
++	if (pAttrib) {
++		if (basedir & FRIBIDI_MASK_RTL)
++			*pAttrib |= TEXTIP_RTOL;
++	}
++
++	if (!isLocal) {
++		free(fvirt);
++		free(ftxt);
++	}
++	return new_str;
++}
++
++#else
++/* DUMMY FUNCTIONS */
++char *
++doCharBidi_UTF8(const char *text, int len, int *v2lPos, char *pDirection,
++	unsigned long *pAttrib)
++{
++	int i;
++	unsigned short *conv = malloc((len + 1) * sizeof(unsigned short));
++
++	if (conv == NULL)
++		return NULL;
++	memcpy(conv, text, len * sizeof(unsigned short));
++	conv[len] = 0;
++	if (v2lPos)
++		for (i = 0; i < len; i++)
++			v2lPos[i] = i;
++	if (pDirection)
++		memset(pDirection, 0, len * sizeof(pDirection[0]));
++	return (char *) conv;
++}
++unsigned short *
++doCharBidi_UC16(const unsigned short *text, int len, int *v2lPos,
++	char *pDirection, unsigned long *pAttrib)
++{
++	int i;
++	char *conv = malloc((len + 1) * sizeof(char));
++
++	if (conv == NULL)
++		return NULL;
++	memcpy(conv, text, len * sizeof(char));
++	conv[len] = 0;
++	if (v2lPos)
++		for (i = 0; i < len; i++)
++			v2lPos[i] = i;
++	if (pDirection)
++		memset(pDirection, 0, len * sizeof(pDirection[0]));
++	return (unsigned short *) conv;
++}
++#endif /* HAVE_FRIBIDI_SUPPORT */
+Index: microwindows-0.91-20090128/src/include/intl.h
+===================================================================
+--- /dev/null
++++ microwindows-0.91-20090128/src/include/intl.h
+@@ -0,0 +1,41 @@
++/* intl.h */
++/*
++ * Copyright (c) 2004 G.Brugnoni <gabriele.brugnoni@dveprojects.com>
++ *
++ * International support for Microwindows
++ */
++
++/* Map len for utf8 */
++extern const char utf8_len_map[256];
++
++/* This macro predict the number of bytes needed by the UTF-8 start character ch */
++#define UTF8_NBYTE(ch)	(utf8_len_map[((unsigned char)(ch))])
++
++/* This macro consider the current TextCoding */
++#define MW_CHRNBYTE(ch) ((mwTextCoding == MWTF_UTF8)? UTF8_NBYTE(ch): 1)
++
++/*
++ *  Do shaping and joining of some international charactes, and return a new UC16 string
++ */
++unsigned short *doCharShape_UC16(const unsigned short *text, int len,
++			int *pNewLen, unsigned long *pAttrib);
++
++/*
++ *  Do shaping and joining of some international charactes, and return a new UTF-8 string
++ */
++char *		doCharShape_UTF8(const char *text, int len, int *pNewLen,
++			unsigned long *pAttrib );
++
++/* International Properties returned in attrib field */
++#define TEXTIP_STANDARD		0x0001	/* text has some standard (ascii) characters */
++#define TEXTIP_EXTENDED		0x0002	/* text has some international characters (nonascii) */
++#define TEXTIP_SHAPED		0x0004	/* text needs (or has been changed for) shape/joining */
++#define TEXTIP_RTOL		0x0008	/* text has all characters that needs
++					  (or has been changed for) right to
++					  left (bidi) rendering */
++
++char *		doCharBidi_UTF8(const char *text, int len, int *v2lPos,
++			char *pDirection, unsigned long *pAttrib);
++
++unsigned short *doCharBidi_UC16(const unsigned short *text, int len,
++			int *v2lPos, char *pDirection, unsigned long *pAttrib);

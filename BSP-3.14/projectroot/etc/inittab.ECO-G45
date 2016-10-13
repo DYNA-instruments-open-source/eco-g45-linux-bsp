@@ -1,0 +1,12 @@
+#
+# /etc/inittab
+#
+
+console::sysinit:/etc/init.d/rcS
+console::respawn:/sbin/getty -L 115200 ttyS0 vt100
+
+# Stuff to do before rebooting
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount /mnt/sram
+::shutdown:/bin/umount -a -r
+

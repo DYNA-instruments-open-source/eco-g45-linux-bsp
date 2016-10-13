@@ -1,0 +1,11 @@
+--- a/drivers/leds/leds-atmel-pwm.c
++++ b/drivers/leds/leds-atmel-pwm.c
+@@ -61,7 +61,7 @@ static int __init pwmled_probe(struct pl
+ 
+ 		led->active_low = dat->active_low;
+ 
+-		status = pwm_channel_alloc(dat->gpio, &led->pwmc);
++		status = pwm_channel_alloc(dat->gpio, &led->pwmc, 0);
+ 		if (status < 0)
+ 			goto err;
+ 

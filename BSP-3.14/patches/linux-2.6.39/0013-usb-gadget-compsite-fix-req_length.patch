@@ -1,0 +1,13 @@
+Index: linux-2.6.39/drivers/usb/gadget/composite.c
+===================================================================
+--- linux-2.6.39.orig/drivers/usb/gadget/composite.c
++++ linux-2.6.39/drivers/usb/gadget/composite.c
+@@ -813,7 +813,7 @@ composite_setup(struct usb_gadget *gadge
+ 	 */
+ 	req->zero = 0;
+ 	req->complete = composite_setup_complete;
+-	req->length = 0;
++	req->length = USB_BUFSIZ;
+ 	gadget->ep0->driver_data = cdev;
+ 
+ 	switch (ctrl->bRequest) {

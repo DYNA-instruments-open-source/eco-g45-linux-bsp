@@ -1,0 +1,13 @@
+Index: mtd-utils-1.3.1/ubi-utils/old-utils/src/libubigen.c
+===================================================================
+--- mtd-utils-1.3.1.orig/ubi-utils/old-utils/src/libubigen.c
++++ mtd-utils-1.3.1/ubi-utils/old-utils/src/libubigen.c
+@@ -201,7 +201,7 @@ ubigen_write_leb(ubi_info_t u, ubigen_ac
+ 	u->v->lnum = cpu_to_be32(u->blks_written);
+ 
+ 	if (action & MARK_AS_UPDATE) {
+-		u->v->copy_flag = (u->v->copy_flag)++;
++		u->v->copy_flag = (u->v->copy_flag)+1;
+ 	}
+ 
+ 	write_vid_hdr(u, action);

@@ -1,0 +1,65 @@
+#!/bin/sh
+#
+# /etc/init.d/touchconfig
+#
+
+case "$1" in
+
+	start|restart|force-reload)
+		# Check if guf_xml driver is present
+		if [ ! -d /sys/class/misc/guf_xml ]
+		then
+			echo "guf_xml driver is not present, skipping configuration"
+			exit 0
+		fi
+		echo -n "configuring touch..."
+		# Check if touch configuration data is present
+		if [ ! -d /sys/class/misc/guf_xml/configurationFile/variables/touch ]
+		then
+			echo "no touch configuration found in XML data, skipping configuration"
+			exit 0
+		fi
+		# Get touch driver information
+		driver_name=`cat /sys/class/misc/guf_xml/configurationFile/variables/touch/driver_info/linux_driver_name/value 2>/dev/null`
+		if [ -z "$driver_name" ]
+		then
+			echo "missing tag 'linux_driver_name' in XML data, skipping configuration"
+			exit 0
+		fi
+		# Look for driver in sysfs
+		for name in `find /sys/class/input/event*/device/name \
+						 /sys/class/input/event*/device/device/name 2>/dev/null`; do
+			if [ "$driver_name" = "`cat $name`" ]
+			then
+				driver_sysfs=`dirname $name`
+			fi
+		done
+		if [ -z "$driver_sysfs" ]
+		then
+			echo "touch driver '$driver_name' not loaded, skipping configuration";
+			exit 0
+		fi
+		# Write configuration
+		for config in `find /sys/class/misc/guf_xml/configurationFile/variables/touch/settings/* \
+						! -iname "regkey" -exec basename {} \; 2>/dev/null`; do
+			(cat /sys/class/misc/guf_xml/configurationFile/variables/touch/settings/$config \
+				> $driver_sysfs/$config) 2>/dev/null
+		done
+		# Run touch calibration if no calibration file exists
+		disable_touch=`cat /sys/class/misc/guf_xml/configurationFile/variables/setting_disable_touchcal/value 2>/dev/null`
+		if [ ! "$disable_touch" = "true" ]
+		then
+			ts_calibrate --skip-if-cal-present
+			sync
+		fi
+		echo "done"
+		;;
+	stop)
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|force-reload}" >&2
+		exit 1
+		;;
+esac
+
+exit 0

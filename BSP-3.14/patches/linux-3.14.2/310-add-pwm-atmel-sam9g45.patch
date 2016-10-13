@@ -1,0 +1,150 @@
+--- a/arch/arm/mach-at91/at91sam9g45.c
++++ b/arch/arm/mach-at91/at91sam9g45.c
+@@ -250,6 +250,7 @@ static struct clk_lookup periph_clocks_l
+ 	CLKDEV_CON_DEV_ID(NULL, "atmel_sha", &aestdessha_clk),
+ 	CLKDEV_CON_DEV_ID(NULL, "atmel_tdes", &aestdessha_clk),
+ 	CLKDEV_CON_DEV_ID(NULL, "atmel_aes", &aestdessha_clk),
++	CLKDEV_CON_DEV_ID(NULL, "at91sam9rl-pwm", &pwm_clk),
+ 	/* more usart lookup table for DT entries */
+ 	CLKDEV_CON_DEV_ID("usart", "ffffee00.serial", &mck),
+ 	CLKDEV_CON_DEV_ID("usart", "fff8c000.serial", &usart0_clk),
+--- a/arch/arm/mach-at91/at91sam9g45_devices.c
++++ b/arch/arm/mach-at91/at91sam9g45_devices.c
+@@ -12,6 +12,7 @@
+ #include <asm/mach/arch.h>
+ #include <asm/mach/map.h>
+ 
++#include <linux/kernel.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/gpio.h>
+ #include <linux/clk.h>
+@@ -1393,9 +1397,7 @@ static void __init at91_add_device_watch
+  *  PWM
+  * --------------------------------------------------------------------*/
+ 
+-#if defined(CONFIG_ATMEL_PWM) || defined(CONFIG_ATMEL_PWM_MODULE)
+-static u32 pwm_mask;
+-
++#if IS_ENABLED(CONFIG_PWM_ATMEL)
+ static struct resource pwm_resources[] = {
+ 	[0] = {
+ 		.start	= AT91SAM9G45_BASE_PWMC,
+@@ -1409,36 +1411,68 @@ static struct resource pwm_resources[] =
+ 	},
+ };
+ 
+-static struct platform_device at91sam9g45_pwm0_device = {
+-	.name	= "atmel_pwm",
+-	.id	= -1,
+-	.dev	= {
+-		.platform_data		= &pwm_mask,
+-	},
+-	.resource	= pwm_resources,
+-	.num_resources	= ARRAY_SIZE(pwm_resources),
+-};
+-
+-void __init at91_add_device_pwm(u32 mask)
+-{
+-	if (mask & (1 << AT91_PWM0))
+-		at91_set_B_periph(AT91_PIN_PD24, 1);	/* enable PWM0 */
+-
+-	if (mask & (1 << AT91_PWM1))
+-		at91_set_B_periph(AT91_PIN_PD31, 1);	/* enable PWM1 */
+-
+-	if (mask & (1 << AT91_PWM2))
+-		at91_set_B_periph(AT91_PIN_PD26, 1);	/* enable PWM2 */
+-
+-	if (mask & (1 << AT91_PWM3))
+-		at91_set_B_periph(AT91_PIN_PD0, 1);	/* enable PWM3 */
++static u32 at91sam9g45_pwm0_config_mask = 0;
+ 
+-	pwm_mask = mask;
++static struct platform_device_info at91sam9g45_pwm0_device_info = {
++	.name	= "at91sam9rl-pwm",
++	.id	= PLATFORM_DEVID_NONE,
++	.res	= pwm_resources,
++	.num_res	= ARRAY_SIZE(pwm_resources),
++	.data = &at91sam9g45_pwm0_config_mask,
++};
++
++struct platform_device * __init at91_add_device_pwm(u32 mask)
++{
++  at91sam9g45_pwm0_config_mask = mask;
++
++  if (mask & AT91_PWM0)
++  {
++    at91_set_B_periph(AT91_PIN_PD24, 1);  /* enable PWM0 */
++    pr_info("at91sam9g45-pwm: mapped channel 0 output to GPIO pin PD24\n");
++  }
++  else if (mask & AT91_PWM0_ALT)
++  {
++    at91_set_B_periph(AT91_PIN_PD24, 1);  /* enable PWM0 */
++    pr_info("at91sam9g45-pwm: mapped channel 0 output to GPIO pin PD24\n");
++  }
++
++	if (mask & AT91_PWM1)
++  {
++    at91_set_B_periph(AT91_PIN_PD31, 1);  /* enable PWM1 */
++    pr_info("at91sam9g45-pwm: mapped channel 1 output to GPIO pin PD31\n");
++  }
++  else if (mask & AT91_PWM1_ALT)
++  {
++    at91_set_B_periph(AT91_PIN_PD25, 1);  /* enable PWM1 */
++    pr_info("at91sam9g45-pwm: mapped channel 1 output to GPIO pin PD25\n");
++  }
++
++  if (mask & AT91_PWM2)
++  {
++    at91_set_B_periph(AT91_PIN_PD26, 1);  /* enable PWM2 */
++    pr_info("at91sam9g45-pwm: mapped channel 2 output to GPIO pin PD26\n");
++  }
++  else if (mask & AT91_PWM2_ALT)
++  {
++    at91_set_A_periph(AT91_PIN_PE31, 1);  /* enable PWM2 */
++    pr_info("at91sam9g45-pwm: mapped channel 2 output to GPIO pin PE31\n");
++  }
++
++  if (mask & AT91_PWM3)
++  {
++    at91_set_B_periph(AT91_PIN_PD0, 1);   /* enable PWM3 */
++    pr_info("at91sam9g45-pwm: mapped channel 3 output to GPIO pin PD0\n");
++  }
++  else if (mask & AT91_PWM3_ALT)
++  {
++    at91_set_B_periph(AT91_PIN_PA25, 1);  /* enable PWM3 */
++    pr_info("at91sam9g45-pwm: mapped channel 3 output to GPIO pin PA25\n");
++  }
+ 
+-	platform_device_register(&at91sam9g45_pwm0_device);
++	return platform_device_register_full(&at91sam9g45_pwm0_device_info);
+ }
+ #else
+-void __init at91_add_device_pwm(u32 mask) {}
++struct platform_device * __init at91_add_device_pwm(u32 mask) { return ERR_PTR(-ENODEV); }
+ #endif
+ 
+ 
+--- a/arch/arm/mach-at91/board.h
++++ b/arch/arm/mach-at91/board.h
+@@ -82,12 +82,16 @@ extern void __init at91_add_device_seria
+ /*
+  * PWM
+  */
+-#define AT91_PWM0	0
+-#define AT91_PWM1	1
+-#define AT91_PWM2	2
+-#define AT91_PWM3	3
++#define AT91_PWM0     (1 << 0)
++#define AT91_PWM0_ALT (1 << 1)
++#define AT91_PWM1     (1 << 2)
++#define AT91_PWM1_ALT (1 << 3)
++#define AT91_PWM2     (1 << 4)
++#define AT91_PWM2_ALT (1 << 5)
++#define AT91_PWM3     (1 << 6)
++#define AT91_PWM3_ALT (1 << 7)
+ 
+-extern void __init at91_add_device_pwm(u32 mask);
++extern struct platform_device * __init at91_add_device_pwm(u32 mask);
+ 
+ /*
+  * SSC -- accessed through ssc_request(id).  Drivers don't bind to SSC

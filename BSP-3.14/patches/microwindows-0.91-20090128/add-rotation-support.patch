@@ -1,0 +1,45 @@
+Index: microwindows-0.91-20090128/src/mwin/winmain.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winmain.c
++++ microwindows-0.91-20090128/src/mwin/winmain.c
+@@ -481,6 +481,8 @@ MwInitialize(void)
+ 	PSD		psd;
+ 	WNDCLASS	wc;
+ 	int		fd;
++	int		rotation = MWPORTRAIT_NONE;
++	char*	rot_env;
+ 	static MWCURSOR arrow = {	/* default arrow cursor*/
+ 		16, 16,
+ 		0,  0,
+@@ -524,10 +526,27 @@ MwInitialize(void)
+ 		GdCloseKeyboard();
+ 		return -1;
+ 	}
+-//    GdSetPortraitMode(psd,MWPORTRAIT_DOWN);
+-//    GdSetPortraitMode(psd,MWPORTRAIT_NONE);
+-//  GdSetPortraitMode(psd,MWPORTRAIT_LEFT);
+-  GdSetPortraitMode(psd,MWPORTRAIT_RIGHT);
++
++	/* read rotation value from environment variable */
++	rot_env = getenv("MW_DISPLAY");
++	if (rot_env != NULL)
++	{
++		int rot;
++		sscanf(rot_env, "%d", &rot);
++		switch (rot)
++		{
++			case 90:
++				rotation = MWPORTRAIT_LEFT;
++				break;
++			case 180:
++				rotation = MWPORTRAIT_DOWN;
++				break;
++			case 270:
++				rotation = MWPORTRAIT_RIGHT;
++				break;
++		}
++	}
++    GdSetPortraitMode(psd, rotation);
+ 
+ 	if ((mouse_fd = GdOpenMouse()) == -1) {
+ 		EPRINTF("Cannot initialise mouse\n");

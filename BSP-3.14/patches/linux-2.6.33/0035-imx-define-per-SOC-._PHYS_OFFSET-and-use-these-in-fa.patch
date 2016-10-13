@@ -1,0 +1,380 @@
+From 0456588e506414e69bd98693b33547f88b6b5521 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Fri, 29 Jan 2010 17:36:05 +0100
+Subject: [PATCH 35/59] imx: define per SOC ..._PHYS_OFFSET and use these in favour of PHYS_OFFSET
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This is a further step in allowing to build a kernel image for more
+than one imx SOC.
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+---
+ arch/arm/mach-mx1/mach-mx1ads.c         |    4 +-
+ arch/arm/mach-mx2/mach-cpuimx27.c       |    2 +-
+ arch/arm/mach-mx2/mach-imx27lite.c      |    2 +-
+ arch/arm/mach-mx2/mach-mx21ads.c        |    2 +-
+ arch/arm/mach-mx2/mach-mx27_3ds.c       |    2 +-
+ arch/arm/mach-mx2/mach-mx27ads.c        |    2 +-
+ arch/arm/mach-mx2/mach-mxt_td60.c       |    2 +-
+ arch/arm/mach-mx2/mach-pca100.c         |    2 +-
+ arch/arm/mach-mx2/mach-pcm038.c         |    2 +-
+ arch/arm/mach-mx25/mx25pdk.c            |    2 +-
+ arch/arm/mach-mx3/mach-armadillo5x0.c   |    2 +-
+ arch/arm/mach-mx3/mach-kzm_arm11_01.c   |    2 +-
+ arch/arm/mach-mx3/mach-mx31_3ds.c       |    2 +-
+ arch/arm/mach-mx3/mach-mx31ads.c        |    2 +-
+ arch/arm/mach-mx3/mach-mx31lilly.c      |    2 +-
+ arch/arm/mach-mx3/mach-mx31lite.c       |    2 +-
+ arch/arm/mach-mx3/mach-mx31moboard.c    |    2 +-
+ arch/arm/mach-mx3/mach-mx35pdk.c        |    2 +-
+ arch/arm/mach-mx3/mach-pcm037.c         |    2 +-
+ arch/arm/mach-mx3/mach-pcm043.c         |    2 +-
+ arch/arm/mach-mx3/mach-qong.c           |    2 +-
+ arch/arm/mach-mxc91231/magx-zn5.c       |    2 +-
+ arch/arm/plat-mxc/include/mach/memory.h |   36 ++++++++++++++++++-------------
+ 23 files changed, 44 insertions(+), 38 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx1/mach-mx1ads.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx1/mach-mx1ads.c
++++ linux-2.6.33/arch/arm/mach-mx1/mach-mx1ads.c
+@@ -147,7 +147,7 @@ MACHINE_START(MX1ADS, "Freescale MX1ADS"
+ 	/* Maintainer: Sascha Hauer, Pengutronix */
+ 	.phys_io	= IMX_IO_PHYS,
+ 	.io_pg_offst	= (IMX_IO_BASE >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x100,
++	.boot_params	= MX1_PHYS_OFFSET + 0x100,
+ 	.map_io		= mx1_map_io,
+ 	.init_irq	= mx1_init_irq,
+ 	.timer		= &mx1ads_timer,
+@@ -157,7 +157,7 @@ MACHINE_END
+ MACHINE_START(MXLADS, "Freescale MXLADS")
+ 	.phys_io	= IMX_IO_PHYS,
+ 	.io_pg_offst	= (IMX_IO_BASE >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x100,
++	.boot_params	= MX1_PHYS_OFFSET + 0x100,
+ 	.map_io		= mx1_map_io,
+ 	.init_irq	= mx1_init_irq,
+ 	.timer		= &mx1ads_timer,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-cpuimx27.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-cpuimx27.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-cpuimx27.c
+@@ -226,7 +226,7 @@ static struct sys_timer eukrea_cpuimx27_
+ MACHINE_START(CPUIMX27, "EUKREA CPUIMX27")
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = eukrea_cpuimx27_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-imx27lite.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-imx27lite.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-imx27lite.c
+@@ -87,7 +87,7 @@ static struct sys_timer mx27lite_timer =
+ MACHINE_START(IMX27LITE, "LogicPD i.MX27LITE")
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = mx27lite_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-mx21ads.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-mx21ads.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-mx21ads.c
+@@ -286,7 +286,7 @@ MACHINE_START(MX21ADS, "Freescale i.MX21
+ 	/* maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io        = MX21_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX21_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX21_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx21ads_map_io,
+ 	.init_irq       = mx21_init_irq,
+ 	.init_machine   = mx21ads_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-mx27_3ds.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-mx27_3ds.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-mx27_3ds.c
+@@ -87,7 +87,7 @@ MACHINE_START(MX27_3DS, "Freescale MX27P
+ 	/* maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = mx27pdk_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-mx27ads.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-mx27ads.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-mx27ads.c
+@@ -336,7 +336,7 @@ MACHINE_START(MX27ADS, "Freescale i.MX27
+ 	/* maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27ads_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = mx27ads_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-mxt_td60.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-mxt_td60.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-mxt_td60.c
+@@ -286,7 +286,7 @@ MACHINE_START(MXT_TD60, "Maxtrack i-MXT
+ 	/* maintainer: Maxtrack Industrial */
+ 	.phys_io	= MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst	= ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x100,
++	.boot_params	= MX27_PHYS_OFFSET + 0x100,
+ 	.map_io		= mx27_map_io,
+ 	.init_irq	= mx27_init_irq,
+ 	.init_machine	= mxt_td60_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-pca100.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-pca100.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-pca100.c
+@@ -235,7 +235,7 @@ static struct sys_timer pca100_timer = {
+ MACHINE_START(PCA100, "phyCARD-i.MX27")
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = pca100_init,
+Index: linux-2.6.33/arch/arm/mach-mx2/mach-pcm038.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/mach-pcm038.c
++++ linux-2.6.33/arch/arm/mach-mx2/mach-pcm038.c
+@@ -328,7 +328,7 @@ static struct sys_timer pcm038_timer = {
+ MACHINE_START(PCM038, "phyCORE-i.MX27")
+ 	.phys_io        = MX27_AIPI_BASE_ADDR,
+ 	.io_pg_offst    = ((MX27_AIPI_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX27_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx27_map_io,
+ 	.init_irq       = mx27_init_irq,
+ 	.init_machine   = pcm038_init,
+Index: linux-2.6.33/arch/arm/mach-mx25/mx25pdk.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx25/mx25pdk.c
++++ linux-2.6.33/arch/arm/mach-mx25/mx25pdk.c
+@@ -102,7 +102,7 @@ MACHINE_START(MX25_3DS, "Freescale MX25P
+ 	/* Maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io	= MX25_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= ((MX25_AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX25_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx25_map_io,
+ 	.init_irq       = mx25_init_irq,
+ 	.init_machine   = mx25pdk_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-armadillo5x0.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-armadillo5x0.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-armadillo5x0.c
+@@ -408,7 +408,7 @@ MACHINE_START(ARMADILLO5X0, "Armadillo-5
+ 	/* Maintainer: Alberto Panizzo  */
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x00000100,
++	.boot_params	= MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io		= mx31_map_io,
+ 	.init_irq	= mx31_init_irq,
+ 	.timer		= &armadillo5x0_timer,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-kzm_arm11_01.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-kzm_arm11_01.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-kzm_arm11_01.c
+@@ -265,7 +265,7 @@ static struct sys_timer kzm_timer = {
+ MACHINE_START(KZM_ARM11_01, "Kyoto Microcomputer Co., Ltd. KZM-ARM11-01")
+ 	.phys_io        = MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst    = (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = kzm_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = kzm_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx31_3ds.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx31_3ds.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx31_3ds.c
+@@ -258,7 +258,7 @@ MACHINE_START(MX31_3DS, "Freescale MX31P
+ 	/* Maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31pdk_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx31ads.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx31ads.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx31ads.c
+@@ -537,7 +537,7 @@ MACHINE_START(MX31ADS, "Freescale MX31AD
+ 	/* Maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31ads_map_io,
+ 	.init_irq       = mx31ads_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx31lilly.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx31lilly.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx31lilly.c
+@@ -197,7 +197,7 @@ static struct sys_timer mx31lilly_timer
+ MACHINE_START(LILLY1131, "INCO startec LILLY-1131")
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x100,
++	.boot_params	= MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io		= mx31_map_io,
+ 	.init_irq	= mx31_init_irq,
+ 	.init_machine	= mx31lilly_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx31lite.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx31lite.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx31lite.c
+@@ -289,7 +289,7 @@ MACHINE_START(MX31LITE, "LogicPD i.MX31
+ 	/* Maintainer: Freescale Semiconductor, Inc. */
+ 	.phys_io        = MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst    = (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31lite_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx31moboard.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx31moboard.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx31moboard.c
+@@ -571,7 +571,7 @@ MACHINE_START(MX31MOBOARD, "EPFL Mobots
+ 	/* Maintainer: Valentin Longchamp, EPFL Mobots group */
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-mx35pdk.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-mx35pdk.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-mx35pdk.c
+@@ -108,7 +108,7 @@ MACHINE_START(MX35_3DS, "Freescale MX35P
+ 	/* Maintainer: Freescale Semiconductor, Inc */
+ 	.phys_io	= MX35_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= ((MX35_AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx35_map_io,
+ 	.init_irq       = mx35_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-pcm037.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-pcm037.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-pcm037.c
+@@ -638,7 +638,7 @@ MACHINE_START(PCM037, "Phytec Phycore pc
+ 	/* Maintainer: Pengutronix */
+ 	.phys_io	= MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-pcm043.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-pcm043.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-pcm043.c
+@@ -250,7 +250,7 @@ MACHINE_START(PCM043, "Phytec Phycore pc
+ 	/* Maintainer: Pengutronix */
+ 	.phys_io	= MX35_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= ((MX35_AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx35_map_io,
+ 	.init_irq       = mx35_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-qong.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-qong.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-qong.c
+@@ -275,7 +275,7 @@ MACHINE_START(QONG, "Dave/DENX QongEVB-L
+ 	/* Maintainer: DENX Software Engineering GmbH */
+ 	.phys_io        = MX31_AIPS1_BASE_ADDR,
+ 	.io_pg_offst    = (MX31_AIPS1_BASE_ADDR_VIRT >> 18) & 0xfffc,
+-	.boot_params    = PHYS_OFFSET + 0x100,
++	.boot_params    = MX3x_PHYS_OFFSET + 0x100,
+ 	.map_io         = mx31_map_io,
+ 	.init_irq       = mx31_init_irq,
+ 	.init_machine   = mxc_board_init,
+Index: linux-2.6.33/arch/arm/mach-mxc91231/magx-zn5.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mxc91231/magx-zn5.c
++++ linux-2.6.33/arch/arm/mach-mxc91231/magx-zn5.c
+@@ -55,7 +55,7 @@ struct sys_timer zn5_timer = {
+ MACHINE_START(MAGX_ZN5, "Motorola Zn5")
+ 	.phys_io	= MXC91231_AIPS1_BASE_ADDR,
+ 	.io_pg_offst	= ((MXC91231_AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
+-	.boot_params	= PHYS_OFFSET + 0x100,
++	.boot_params	= MXC91231_PHYS_OFFSET + 0x100,
+ 	.map_io		= mxc91231_map_io,
+ 	.init_irq	= mxc91231_init_irq,
+ 	.timer		= &zn5_timer,
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/memory.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/memory.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/memory.h
+@@ -11,21 +11,27 @@
+ #ifndef __ASM_ARCH_MXC_MEMORY_H__
+ #define __ASM_ARCH_MXC_MEMORY_H__
+ 
+-#if defined CONFIG_ARCH_MX1
+-#define PHYS_OFFSET		UL(0x08000000)
+-#elif defined CONFIG_ARCH_MX2
+-#ifdef CONFIG_MACH_MX21
+-#define PHYS_OFFSET		UL(0xC0000000)
+-#endif
+-#ifdef CONFIG_MACH_MX27
+-#define PHYS_OFFSET		UL(0xA0000000)
+-#endif
+-#elif defined CONFIG_ARCH_MX3
+-#define PHYS_OFFSET		UL(0x80000000)
+-#elif defined CONFIG_ARCH_MX25
+-#define PHYS_OFFSET		UL(0x80000000)
+-#elif defined CONFIG_ARCH_MXC91231
+-#define PHYS_OFFSET		UL(0x90000000)
++#define MX1_PHYS_OFFSET		UL(0x08000000)
++#define MX21_PHYS_OFFSET	UL(0xc0000000)
++#define MX25_PHYS_OFFSET	UL(0x80000000)
++#define MX27_PHYS_OFFSET	UL(0xa0000000)
++#define MX3x_PHYS_OFFSET	UL(0x80000000)
++#define MXC91231_PHYS_OFFSET	UL(0x90000000)
++
++#if !defined(CONFIG_RUNTIME_PHYS_OFFSET)
++# if defined CONFIG_ARCH_MX1
++#  define PHYS_OFFSET		MX1_PHYS_OFFSET
++# elif defined CONFIG_MACH_MX21
++#  define PHYS_OFFSET		MX21_PHYS_OFFSET
++# elif defined CONFIG_ARCH_MX25
++#  define PHYS_OFFSET		MX25_PHYS_OFFSET
++# elif defined CONFIG_MACH_MX27
++#  define PHYS_OFFSET		MX27_PHYS_OFFSET
++# elif defined CONFIG_ARCH_MX3
++#  define PHYS_OFFSET		MX3x_PHYS_OFFSET
++# elif defined CONFIG_ARCH_MXC91231
++#  define PHYS_OFFSET		MXC91231_PHYS_OFFSET
++# endif
+ #endif
+ 
+ #if defined(CONFIG_MX1_VIDEO)

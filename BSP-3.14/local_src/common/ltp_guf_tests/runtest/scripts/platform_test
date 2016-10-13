@@ -1,0 +1,59 @@
+#!/bin/sh
+#*****************************************************************************#
+# platform_test - Platform test for G&F Linux BSPs                            #
+# Author: Tim Jaacks <tim.jaacks@garz-fricke.com>                             #
+# Copyright 2011 Garz & Fricke GmbH                                           #
+#*****************************************************************************#
+
+#*****************************************************************************#
+# Variables                                                                   #
+#*****************************************************************************#
+platform="$1"
+logfile="$2"
+ltp_path="/opt/ltp"
+
+#*****************************************************************************#
+# Check parameters                                                            #
+#*****************************************************************************#
+if [ -z $platform ]
+then
+	echo "Please specify the platform to be tested."
+	echo "Syntax: platform_test <platform> [<logfile>]"
+	echo "If no logfile is specified, \"logfile.txt\" is taken by default."
+	exit 1
+fi
+if [ -z $logfile ]
+then
+	logfile="logfile.txt"
+fi
+
+#*****************************************************************************#
+# Print header                                                                #
+#*****************************************************************************#
+echo ""
+echo "*******************************************"
+echo "* Garz & Fricke - Linux BSP Platform Test *"
+echo "*******************************************"
+echo ""
+echo "This script runs several LTP tests for the specified platform."
+echo "For certain tests, some preperations have to be done in order to get"
+echo "them passed:"
+echo ""
+echo " -> USB: Plug a memory stick into all USB host interfaces."
+echo " -> MMC: Plug an MMC/SD-Card into the card slot."
+echo " -> RS485: Connect the RS485 interface with an RS485-to-RS232-converter"
+echo "      (regard half-duplex or full-duplex mode, depending on the platform)"
+echo "      and connect this one to a Windows PC. Open the RS485Test on the PC,"
+echo "      choose to the according serial port and activate \"Echo On\"."
+echo ""
+echo "If the platform to be tested does not have the above interfaces, the"
+echo "according tests are of course not executed."
+echo ""
+echo -n "Please press <return> as soon as everything is prepared..."
+read
+
+#*****************************************************************************#
+# Run tests                                                                   #
+#*****************************************************************************#
+$ltp_path/runltp -p -l $logfile -f $platform
+cat $ltp_path/results/$logfile

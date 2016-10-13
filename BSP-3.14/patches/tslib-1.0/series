@@ -1,0 +1,27 @@
+tslib-1.0_link_plugins_against_libts.patch
+ts_test_add_quit_button.diff -p0
+tests_assume_input_api.diff -p0
+tests_clear_screen_at_end.diff -p0
+dmc-support.diff
+add-open-env.diff
+egalax.diff
+fix-autotools.diff
+r52-This-patch-adds-support-for-EVIOCGRAB-on-the-input-d.patch
+r57-Fix-use-with-devices-that-can-t-measure-pressure-cou.patch
+r62-Cleanup-and-kill-syntax-errors-introduced-by-copying.patch
+r64-BTN_TOUCH-is-only-required-when-the-device-isn-t-abl.patch
+r66-Define-the-_CNT-macros-if-needed.patch
+r67-Kill-old-unused-ts_read_raw_module.c.patch
+r71-Fix-regularly-reported-absbit-keybit-copy-paste-bug.patch
+r73-Prefix-correct-some-error-messages-in-input-raw-modu.patch
+r75-Rely-on-SYN-Events-when-pen-is-lifted.patch
+r78-input-raw-Handling-of-EVIOCGBIT-ioctl-coding.patch
+# not working in the moment
+# r80-storing-hardware-touch-calibration-support.patch
+r81-storing-hardware-touch-calibration-support.patch
+tslib_add_lowpass_filter.patch
+tslib_add_median_filter.patch
+tslib_add_skip_module.patch
+tslib_add_mean_filter.patch
+tslib_add_crop_filter.patch
+

@@ -1,0 +1,27 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/gpio.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/gpio.c
++++ linux-2.6.33/arch/arm/plat-mxc/gpio.c
+@@ -245,10 +245,19 @@ static void mxc_gpio_set(struct gpio_chi
+ 
+ static int mxc_gpio_get(struct gpio_chip *chip, unsigned offset)
+ {
+-	struct mxc_gpio_port *port =
++	int ret = 0;
++		struct mxc_gpio_port *port =
+ 		container_of(chip, struct mxc_gpio_port, chip);
+-
+-	return (__raw_readl(port->base + GPIO_PSR) >> offset) & 1;
++	int dir = (__raw_readl(port->base + GPIO_GDIR) >> offset) & 1;
++	
++		
++	if(dir) { /* gpio is an output pin */
++		ret = (__raw_readl(port->base + GPIO_DR) >> offset) & 1;
++	}
++	else { /* gpio is an input pin */
++		ret = (__raw_readl(port->base + GPIO_PSR) >> offset) & 1;
++	}
++	return ret;
+ }
+ 
+ static int mxc_gpio_direction_input(struct gpio_chip *chip, unsigned offset)

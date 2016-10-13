@@ -1,0 +1,1601 @@
+--- /dev/null
++++ b/arch/arm/mach-at91/board-configfs-at91sam9g45.c
+@@ -0,0 +1,1200 @@
++/*
++ * board-configfs-at91sam9g45.c
++ *
++ *  Created on: 09.05.2014
++ *      Author: Johannes Lode <linuxer@quantentunnel.de>
++ */
++
++#define DEBUG
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/slab.h>
++
++#include <linux/ctype.h>
++#include <linux/configfs.h>
++
++#include <linux/gpio.h>
++#include <linux/platform_device.h>
++#include <linux/irqnr.h>
++#include <linux/string.h>
++
++#include "board.h"
++#include "at91_shdwc.h"
++#include "sam9_smc.h"
++#include "generic.h"
++
++#ifdef ECLIPSE_EDITOR
++#warning "hey Alter, nimm die Editor-Hilfe aus dem Quelltext"
++#define __init
++#define __exit
++#define IS_ENABLED(x) (1)
++#define KERN_ERR
++#endif
++
++/*
++ * USB HS Host port (common to OHCI & EHCI)
++ */
++static struct at91_usbh_data __initdata eco_g45_usbh_hs_data = {
++    .ports    = 2,
++    .vbus_pin = {AT91_PIN_PB23, AT91_PIN_PB24},
++    .vbus_pin_active_low = {1, 1},
++    .overcurrent_pin= {-EINVAL, -EINVAL},
++};
++
++/*
++ * USB HS Device port
++ */
++static struct usba_platform_data __initdata eco_g45_usba_udc_data = {
++    .vbus_pin = AT91_PIN_PB19,
++    //  .force_full_speed = 0,
++};
++
++/*
++ * MCI (SD/MMC)
++ */
++static struct mci_platform_data __initdata eco_g45_mci0_data = {
++    .slot[0] = {
++        .bus_width  = 4,
++        .detect_pin = AT91_PIN_PD10,
++        .wp_pin   = -EINVAL,
++    },
++};
++
++/*
++ * AC97
++ * reset_pin is not connected: NRST
++ */
++static struct ac97c_platform_data eco_g45_ac97_data = {
++    .reset_pin = -1,
++};
++
++
++
++
++
++#define CONFIGFS_NAME "board-at91sam9g45"
++
++enum board_config_G45_attribute_type {
++  ReadmeText,
++  EnablePlatformDevice,
++  EnableSpiDeviceConfig,
++  PwmAtmelPin,
++  SpiDriverName,
++  SpiChipSelect,
++  SpiMaxSpeed,
++  SpiTransferMode,
++  SpiDeviceIrq,
++  SpiBusNumber,
++
++};
++
++struct board_config_G45_attribute {
++  struct configfs_attribute config_attr;
++  enum board_config_G45_attribute_type type;
++};
++
++struct board_config_G45_readme_attribute {
++    struct board_config_G45_attribute attr;
++    const char* text;
++};
++
++static ssize_t board_config_G45_show_readme(struct config_item *item,
++    struct configfs_attribute *attr,
++    char *buffer)
++{
++  ssize_t ret = -ENOENT;
++  struct board_config_G45_attribute* myAttr;
++
++  myAttr = container_of(attr, struct board_config_G45_attribute, config_attr);
++
++  if (ReadmeText == myAttr->type)
++  {
++    struct board_config_G45_readme_attribute* readme;
++    readme = container_of(myAttr, struct board_config_G45_readme_attribute, attr);
++
++    strcpy(buffer, readme->text);
++    ret = strlen(readme->text);
++  }
++
++  return ret;
++}
++struct board_config_G45_pdev_enable_attr {
++  struct board_config_G45_attribute attr;
++};
++
++static struct board_config_G45_pdev_enable_attr board_config_G45_pdev_enable = {
++    .attr = {
++        .config_attr = {
++            .ca_name = "enable",
++            .ca_owner = THIS_MODULE,
++            .ca_mode = S_IRUGO | S_IWUSR,
++        },
++        .type = EnablePlatformDevice,
++    },
++};
++
++enum board_config_G45_object_type {
++  UninitializedObject = 0,
++  PlatformDeviceObject,
++  SpiTargetObject,
++};
++
++struct board_config_G45_object {
++  struct config_group config_group;
++  enum board_config_G45_object_type type;
++};
++
++struct board_config_G45_pdev_target {
++  struct board_config_G45_object config_object;
++  struct platform_device *pdev;
++  int (*register_device)(struct board_config_G45_pdev_target* target);
++  struct configfs_attribute **ro_attrs;
++};
++
++static ssize_t board_config_G45_show_pdev_state(struct config_item *item,
++    struct configfs_attribute *attr,
++    char *buffer)
++{
++  struct config_group* cg;
++  struct board_config_G45_object *co;
++  struct board_config_G45_pdev_target* target;
++
++  cg = container_of(item, struct config_group, cg_item);
++  co = container_of(cg, struct board_config_G45_object, config_group);
++  target = container_of(co, struct board_config_G45_pdev_target, config_object);
++
++  return sprintf(buffer, "%d\n", target->pdev ? 1 : 0);
++}
++
++static ssize_t board_config_G45_set_pdev_state(struct config_item *item,
++    struct configfs_attribute *attr,
++    const char *buffer, size_t size)
++{
++  ssize_t ret = -EINVAL;
++  size_t orig_size = size;
++  struct config_group* cg;
++  struct board_config_G45_object *co;
++  struct board_config_G45_pdev_target* target;
++  bool enable;
++  int i;
++
++  cg = container_of(item, struct config_group, cg_item);
++  co = container_of(cg, struct board_config_G45_object, config_group);
++  target = container_of(co, struct board_config_G45_pdev_target, config_object);
++
++  // trim leading spaces
++  while (size && (isspace(buffer[0])))
++  {
++    buffer++;
++    size--;
++  }
++
++  // trim trailing spaces
++  while (size && (isspace(buffer[size - 1])))
++  {
++    size--;
++//    buffer[size] = 0;
++  }
++
++  ret = strtobool(buffer, &enable);
++
++  if (!ret)
++  {
++    // zero means, the was a valid flag in the buffer
++    if (!enable)
++    {
++      pr_debug(CONFIGFS_NAME ": disabling %s\n", target->config_object.config_group.cg_item.ci_namebuf);
++      if (target->pdev)
++        platform_device_unregister(target->pdev);
++      target->pdev = 0;
++      ret = orig_size;
++      if (target->ro_attrs)
++      {
++        for (i = 0; target->ro_attrs[i]; i++)
++          target->ro_attrs[i]->ca_mode = S_IRUGO | S_IWUSR;
++
++      }
++    }
++    else
++    {
++      pr_debug(CONFIGFS_NAME ": enabling %s\n", target->config_object.config_group.cg_item.ci_namebuf);
++      if (target->register_device)
++        ret = target->register_device(target);
++
++      if (!ret)
++      {
++        ret = orig_size;
++        if (target->ro_attrs)
++        {
++          for (i = 0; target->ro_attrs[i]; i++)
++            target->ro_attrs[i]->ca_mode = S_IRUGO;
++        }
++      }
++    }
++  }
++
++  return ret;
++}
++
++
++
++
++#if IS_ENABLED(CONFIG_SPI_ATMEL)
++
++static struct board_config_G45_attribute board_config_G45_spi_target_template_attr[] = {
++    {
++        .config_attr = {
++            .ca_name  = "driver",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiDriverName,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "chip_select",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiChipSelect,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "max_speed",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiMaxSpeed,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "spi_mode",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiTransferMode,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "irq",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiDeviceIrq,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "enable",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = EnableSpiDeviceConfig,
++    },
++    {
++        .config_attr = {
++            .ca_name  = "bus_number",
++            .ca_owner = THIS_MODULE,
++            .ca_mode  = S_IRUGO | S_IWUSR,
++        },
++        .type = SpiBusNumber,
++    },
++};
++
++#define NUM_SPI_ATTRS 7
++
++struct board_config_G45_spi_target {
++  struct board_config_G45_object config_object;
++  struct config_item_type item_type;
++  struct board_config_G45_attribute attr[NUM_SPI_ATTRS];
++  struct configfs_attribute *attrs[NUM_SPI_ATTRS + 1];
++  struct spi_board_info spi_info;
++  int cs_gpio;
++  bool enabled:1;
++//  int (*register_device)(struct board_config_G45_pdev_target* target);
++  struct configfs_attribute **ro_attrs;
++};
++
++
++/*
++ * Because the spi-atmel driver works around a number of erratas of the SPI macro cell, all this does not support
++ * the decoder mode of the SPI master, only the decoderless mode using GPIO pins. Some of these GPIO pins
++ * may be clients of such a decoder chip, thus it is possible to have a decoder, when there is a GPIO driver for this.
++ */
++
++/*
++ * SPI devices.
++ */
++static ssize_t board_config_G45_spi_target_show_enable(struct board_config_G45_spi_target *device, char *buffer)
++{
++  return sprintf(buffer, "%d\n", device->enabled ? 1 : 0);
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_driver_name(struct board_config_G45_spi_target *device, char *buffer)
++{
++  return sprintf(buffer, "%s\n", device->spi_info.modalias);
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_chip_select(struct board_config_G45_spi_target *device, char *buffer)
++{
++  ssize_t ret = -EINVAL;
++
++  if (gpio_is_valid(device->cs_gpio))
++  {
++    if ((typeof(device->spi_info.chip_select))~0 != device->spi_info.chip_select)
++      ret = sprintf(buffer, "cs%d via gpio%d\n", device->spi_info.chip_select, device->cs_gpio);
++    else
++      ret = sprintf(buffer, "cs(unset) via gpio%d\n", device->cs_gpio);
++  }
++  else if ((typeof(device->spi_info.chip_select))~0 != device->spi_info.chip_select)
++    ret = sprintf(buffer, "cs%d\n", device->spi_info.chip_select);
++  else
++    ret = sprintf(buffer, "unset\n");
++
++  return ret;
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_max_speed(struct board_config_G45_spi_target *device, char *buffer)
++{
++  return sprintf(buffer, "%d\n", device->spi_info.max_speed_hz);
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_transfer_mode(struct board_config_G45_spi_target *device, char *buffer)
++{
++  ssize_t ret = -EINVAL;
++  int mode_num = 0;
++  const char* cs_high = ", CS low active";
++  const char* msb_first = ", MSB first";
++
++  if (0x1000 <= device->spi_info.mode) {
++    ret = sprintf(buffer, "unset\n");
++  }
++  else {
++    mode_num = device->spi_info.mode & (SPI_CPHA | SPI_CPOL);
++    if (SPI_CS_HIGH & device->spi_info.mode)
++      cs_high = ", CS high active";
++    if (SPI_LSB_FIRST & device->spi_info.mode)
++      msb_first = ", LSB first";
++
++    ret = sprintf(buffer, "%d%s%s\n", mode_num, msb_first, cs_high);
++  }
++
++  return ret;
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_device_irq(struct board_config_G45_spi_target *device, char *buffer)
++{
++  ssize_t ret = -EINVAL;
++  if (nr_irqs < device->spi_info.irq)
++    ret = sprintf(buffer, "unset\n");
++  else
++    ret = sprintf(buffer, "%d\n", device->spi_info.irq);
++  return ret;
++}
++
++static ssize_t board_config_G45_spi_target_attr_show_bus_number(struct board_config_G45_spi_target *device, char *buffer)
++{
++  ssize_t ret = -EINVAL;
++  if ((typeof(device->spi_info.bus_num))~0 == device->spi_info.bus_num)
++    ret = sprintf(buffer, "unset\n");
++  else
++    ret = sprintf(buffer, "%d\n", device->spi_info.bus_num);
++  return ret;
++}
++
++static ssize_t board_config_G45_spi_target_attr_show(struct config_item * item, struct configfs_attribute * attr,char * buffer)
++{
++  ssize_t ret = -ENOENT;
++  struct config_group *cg;
++  struct board_config_G45_object *co;
++  struct board_config_G45_spi_target *device;
++  struct board_config_G45_attribute *myAttr;
++
++  cg = container_of(item, struct config_group, cg_item);
++  co = container_of(cg, struct board_config_G45_object, config_group);
++  device = container_of(co, struct board_config_G45_spi_target, config_object);
++
++  myAttr = container_of(attr, struct board_config_G45_attribute, config_attr);
++
++  switch (myAttr->type)
++  {
++  case ReadmeText:
++    ret = board_config_G45_show_readme(item, attr, buffer);
++    break;
++  case EnableSpiDeviceConfig:
++    ret = board_config_G45_spi_target_show_enable(device, buffer);
++    break;
++  case SpiDriverName:
++    ret = board_config_G45_spi_target_attr_show_driver_name(device, buffer);
++    break;
++  case SpiChipSelect:
++    ret = board_config_G45_spi_target_attr_show_chip_select(device, buffer);
++    break;
++  case SpiMaxSpeed:
++    ret = board_config_G45_spi_target_attr_show_max_speed(device, buffer);
++    break;
++  case SpiTransferMode:
++    ret = board_config_G45_spi_target_attr_show_transfer_mode(device, buffer);
++    break;
++  case SpiDeviceIrq:
++    ret = board_config_G45_spi_target_attr_show_device_irq(device, buffer);
++    break;
++  case SpiBusNumber:
++    ret = board_config_G45_spi_target_attr_show_bus_number(device, buffer);
++    break;
++  default:
++    ret = -ENOENT;
++    break;
++  }
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_enable_config(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret = 0;
++  char unset[60];
++
++  unset[0] = 0;
++
++  // check for invalid settings, as far as possible
++  if ((typeof(device->spi_info.bus_num))~0 == device->spi_info.bus_num)
++  {
++    ret = -EPERM;
++    strcat(unset, "bus_number ");
++  }
++
++  if (0x1000 <= device->spi_info.mode)
++  {
++    ret = -EPERM;
++    strcat(unset, "spi_mode ");
++  }
++
++  if (!device->spi_info.max_speed_hz)
++  {
++    ret = -EPERM;
++    strcat(unset, "max_speed ");
++  }
++
++  if ((typeof(device->spi_info.chip_select))~0 == device->spi_info.chip_select)
++  {
++    ret = -EPERM;
++    strcat(unset, "chip_select ");
++  }
++
++  if (ret)
++  {
++    pr_err(CONFIGFS_NAME ": could not activate SPI target description for %s, have unset fields: %s\n", device->config_object.config_group.cg_item.ci_namebuf, unset);
++  }
++  else
++  {
++    at91_add_device_spi(&device->spi_info, 1);
++    if (device->ro_attrs)
++    {
++      int i;
++      for (i = 0; device->ro_attrs[i]; i++)
++        device->ro_attrs[i]->ca_mode = S_IRUGO;
++    }
++  }
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_driver_name(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret = 0;
++  int copy_len = size;
++
++  if (sizeof(device->spi_info.modalias) < copy_len)
++    copy_len = sizeof(device->spi_info.modalias);
++
++  strncpy(device->spi_info.modalias, buffer, copy_len);
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_chip_select(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret = 0;
++  static const char gpio[] = "gpio";
++  static const char cs[] = "cs";
++  unsigned long num;
++
++  if (!strncmp(buffer, gpio, sizeof(gpio) - 1)) {
++    ret = kstrtoul(buffer + sizeof(gpio) - 1, 10, &num);
++    if (!ret && gpio_is_valid(num)) {
++      device->cs_gpio = num;
++      device->spi_info.controller_data = (void*)num;  // FIXME: GPIO pin 0 is not usable for chip select
++    }
++    else
++      ret = -EINVAL;
++  }
++  else if (!strncmp(buffer, cs, sizeof(cs) - 1)) {
++    ret = kstrtoul(buffer + sizeof(cs) - 1, 10, &num);
++    if (!ret && ((u16)~0 > num)) {
++      device->spi_info.chip_select = num;
++    }
++    else
++      ret = -EINVAL;
++  }
++  else
++    ret = -EINVAL;
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_max_speed(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret;
++  unsigned long num;
++
++  ret = kstrtoul(buffer, 10, &num);
++
++  if (!ret && (250000000 > num))
++    device->spi_info.max_speed_hz = num;
++  else
++    ret = -EINVAL;
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_transfer_mode(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret = 0;
++
++  if (0x1000 <= device->spi_info.mode)
++    device->spi_info.mode = 0;
++
++  if (!strncmp(buffer, "0", size))
++    device->spi_info.mode = (device->spi_info.mode & ~3);
++  else if (!strncmp(buffer, "1", size))
++    device->spi_info.mode = (device->spi_info.mode & ~3) | 1;
++  else if (!strncmp(buffer, "2", size))
++    device->spi_info.mode = (device->spi_info.mode & ~3) | 2;
++  else if (!strncmp(buffer, "3", size))
++    device->spi_info.mode = (device->spi_info.mode & ~3) | 3;
++  else if (!strncmp(buffer, "LSB", size))
++    device->spi_info.mode |= SPI_LSB_FIRST;
++  else if (!strncmp(buffer, "MSB", size))
++    device->spi_info.mode &= ~SPI_LSB_FIRST;
++  else if (!strncmp(buffer, "high", size))
++    device->spi_info.mode |= SPI_CS_HIGH;
++  else if (!strncmp(buffer, "low", size))
++    device->spi_info.mode &= ~SPI_CS_HIGH;
++  else
++    ret = -EINVAL;
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_device_irq(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret;
++  long num;
++
++  ret = kstrtol(buffer, 10, &num);
++
++  if (-1 > num)
++    num = -1;
++
++  if (!ret && (nr_irqs > num))
++    device->spi_info.irq = num;
++  else
++    ret = -ENXIO;
++
++  return ret;
++}
++
++static int board_config_G45_spi_target_attr_set_bus_number(struct board_config_G45_spi_target *device, const char *buffer, size_t size)
++{
++  int ret;
++  unsigned long num;
++
++  ret = kstrtoul(buffer, 10, &num);
++
++  if (!ret && ((u16)~0 > num))
++    device->spi_info.bus_num = num;
++  else
++    ret = -ENXIO;
++
++  return ret;
++}
++
++static ssize_t board_config_G45_spi_target_attr_store(struct config_item * item,struct configfs_attribute * attr,const char *buffer, size_t size)
++{
++  ssize_t ret = -ENOENT;
++  ssize_t orig_size = size;
++  struct config_group *cg;
++  struct board_config_G45_object *co;
++  struct board_config_G45_spi_target *device;
++  struct board_config_G45_attribute *myAttr;
++
++  cg = container_of(item, struct config_group, cg_item);
++  co = container_of(cg, struct board_config_G45_object, config_group);
++  device = container_of(co, struct board_config_G45_spi_target, config_object);
++
++  myAttr = container_of(attr, struct board_config_G45_attribute, config_attr);
++
++  // trim leading spaces
++  while (size && isspace(buffer[0]))
++  {
++    buffer++;
++    size--;
++  }
++
++  // trim trailing spaces
++  while (size && isspace(buffer[size - 1]))
++  {
++    size--;
++//    buffer[size] = 0;
++  }
++
++  switch (myAttr->type)
++  {
++  case EnableSpiDeviceConfig:
++    ret = board_config_G45_spi_target_enable_config(device, buffer, size);
++    break;
++  case SpiDriverName:
++    ret = board_config_G45_spi_target_attr_set_driver_name(device, buffer, size);
++    break;
++  case SpiChipSelect:
++    ret = board_config_G45_spi_target_attr_set_chip_select(device, buffer, size);
++    break;
++  case SpiMaxSpeed:
++    ret = board_config_G45_spi_target_attr_set_max_speed(device, buffer, size);
++    break;
++  case SpiTransferMode:
++    ret = board_config_G45_spi_target_attr_set_transfer_mode(device, buffer, size);
++    break;
++  case SpiDeviceIrq:
++    ret = board_config_G45_spi_target_attr_set_device_irq(device, buffer, size);
++    break;
++  case SpiBusNumber:
++    ret = board_config_G45_spi_target_attr_set_bus_number(device, buffer, size);
++    break;
++  default:
++    ret = -ENOENT;
++    break;
++  }
++
++  if (!ret)
++    ret = orig_size;
++
++  return ret;
++}
++
++static void board_config_G45_spi_target_release(struct config_item *item)
++{
++}
++
++static struct configfs_item_operations board_config_G45_spi_target_ops = {
++  .release    = board_config_G45_spi_target_release,
++  .show_attribute   = board_config_G45_spi_target_attr_show,
++  .store_attribute  = board_config_G45_spi_target_attr_store,
++};
++
++struct config_item *board_config_G45_spi_make_target(struct config_group *group, const char *name)
++{
++  struct board_config_G45_spi_target *device;
++  int i;
++
++  device = kzalloc(sizeof(*device), GFP_KERNEL);
++  if (!device)
++    return ERR_PTR(-ENOMEM);
++
++  device->config_object.type = SpiTargetObject;
++  device->cs_gpio = -ENOENT;
++
++  for (i = 0; i < ARRAY_SIZE(device->attr); i++) {
++    device->attr[i] = board_config_G45_spi_target_template_attr[i];
++    device->attrs[i] = &device->attr[i].config_attr;
++  }
++  device->ro_attrs = device->attrs;
++  device->item_type.ct_item_ops = &board_config_G45_spi_target_ops;
++  device->item_type.ct_attrs = device->attrs;
++  device->item_type.ct_owner = THIS_MODULE;
++  device->spi_info.irq  = -1;
++  device->spi_info.bus_num = ~0;
++  device->spi_info.chip_select = ~0;
++  device->spi_info.mode = ~0;
++  strcpy(device->spi_info.modalias, "spidev");
++
++  config_item_init_type_name(&device->config_object.config_group.cg_item, name, &device->item_type);
++
++  return &device->config_object.config_group.cg_item;
++}
++
++static void board_config_G45_spi_drop_target(struct config_group *group, struct config_item *item)
++{
++  struct config_group *cg;
++  struct board_config_G45_object *co;
++  struct board_config_G45_spi_target *device;
++
++  cg = container_of(item, struct config_group, cg_item);
++  co = container_of(cg, struct board_config_G45_object, config_group);
++  device = container_of(co, struct board_config_G45_spi_target, config_object);
++
++  if (device->enabled)
++    pr_err(CONFIGFS_NAME ": removing entry %s from SPI device configFS group, but the device structures in the kernel will stay and cannot be altered by a new entry!\n", item->ci_namebuf);
++
++  kfree(device);
++}
++
++static struct configfs_group_operations board_config_G45_spi_group_ops = {
++    .make_item = &board_config_G45_spi_make_target,
++    .drop_item = &board_config_G45_spi_drop_target,
++};
++
++static struct configfs_item_operations board_config_G45_spi_item_ops = {
++    .show_attribute = &board_config_G45_spi_target_attr_show,
++};
++
++static const char board_config_G45_spi_readme_text[] =
++    "Here one can create and activate SPI board information, which associates\n"
++    "SPI targets on any SPI bus with a driver, that can handle the target.\n"
++    "SPI busses are created by SPI master controllers (and their drivers)\n"
++    "\n"
++    "Create a target description by making a directory of any name of your choice.\n"
++    "Then fill the attribute files in that directory with the correct informations.\n"
++    "Finally set the enable attribute to to 1. This will place the device description\n"
++    "into the kernel device tree. If the named driver is present, the device will get\n"
++    "managed by this. After enabling the description, it is no more possible to change\n"
++    "any setting and it is even no more possible to disable the description.\n"
++    "You may remove the target directory, but the description remains active in the\n"
++    "kernel until reboot.\n"
++    "\n"
++    "The attributes work as follows:\n"
++    "  \"driver\"       - The name of the driver to be used.\n"
++    "  \"bus\"          - The number of the bus, where the target is attached to.\n"
++    "  \"chip_select\"  - is either csX, where X is a valid number for the choosen bus or\n"
++    "                     is gpioX, where X is a valid GPIO pin number, which is used for chip select\n"
++    "  \"max_speed\"    - This gives the maximum clock frequency for this target in Hz.\n"
++    "  \"spi_mode\"     - This is a command input and a state output. Reading this attribute, \n"
++    "                     you get a string like \"3, MSB first, CS low active\", which describes\n"
++    "                     the used bus mode. \n"
++    "                     Writing to this attribute, you can send a plain number for \n"
++    "                     SPI mode 0 .. 3, MSB or LSB for the bit order, high or low for the \n"
++    "                     activity level of the CS pin. Proably you want never change the latter.\n"
++    "  \"irq\"          - If the SPI target peripheral uses an interrupt line, this can be set here.\n"
++    "  \"enable\"       - Send 1 to this attribute, once the configuration is complete and shall be\n"
++    "                     activated in the kernel. All attributes turn read only on this, even the \n"
++    "                     enable file! An SPI target description cannot be removed from the system,\n"
++    "                     even not by removing the configuration object here.\n";
++
++static struct board_config_G45_readme_attribute board_config_G45_spi_readme = {
++    .attr = {
++        .type = ReadmeText,
++        .config_attr = {
++            .ca_name = "description",
++            .ca_owner = THIS_MODULE,
++            .ca_mode = S_IRUGO,
++        }
++    },
++    .text = board_config_G45_spi_readme_text,
++};
++
++static struct configfs_attribute * board_config_G45_spi_attrs[] = {
++    &board_config_G45_spi_readme.attr.config_attr,
++    0 /* sentinel */
++};
++
++static struct config_item_type board_config_G45_spi_item_type = {
++    .ct_owner = THIS_MODULE,
++    .ct_group_ops = &board_config_G45_spi_group_ops,
++    .ct_item_ops = &board_config_G45_spi_item_ops,
++    .ct_attrs = board_config_G45_spi_attrs,
++};
++
++static struct config_group board_config_G45_spi = { };
++
++static void __init board_config_G45_spi_init(void)
++{
++  config_group_init_type_name(&board_config_G45_spi, "spi", &board_config_G45_spi_item_type);
++
++  pr_info(CONFIGFS_NAME ": registered spi platform devices creator for runtime creation of spi_board_info device objects\n");
++}
++
++static void __exit board_config_G45_spi_exit(void)
++{
++}
++#else
++inline static void __init board_config_G45_spi_init(void) {}
++inline static void __exit board_config_G45_spi_exit(void) {}
++#endif
++
++#if IS_ENABLED(CONFIG_PWM_ATMEL)
++struct board_config_G45_pwm_atmel_pin_attribute {
++  struct board_config_G45_attribute attr;
++  u32 on1; // add this to state for output alternative 1
++  u32 on2; // add this to state for output alternative 2
++  u32 mask;// this is a logical mask (AND) for the relevant bits of state, the logical inverse clears the bits in state
++  u32* state;
++};
++
++static ssize_t board_config_G45_show_pwm_atmel_pin(struct config_item *item,
++                                               struct board_config_G45_pwm_atmel_pin_attribute *attr,
++                                               char *buffer)
++{
++  const char* state;
++
++  if (attr->on1 == (attr->mask & *attr->state))
++    state = "on1";
++  else if (attr->on2 == (attr->mask & *attr->state))
++    state = "on2";
++  else
++    state = "off";
++
++  return sprintf(buffer, "%s\n", state);
++}
++
++static ssize_t board_config_G45_store_pwm_atmel_pin(struct config_item *item,
++                                                    struct board_config_G45_pwm_atmel_pin_attribute* pinAttr,
++                                                    const char *buffer, size_t size)
++{
++  ssize_t ret;
++
++  ret = size;
++
++  // trim leading spaces
++  while (size && (isspace(buffer[0])))
++  {
++    buffer++;
++    size--;
++  }
++
++  // trim trailing spaces
++  while (size && (isspace(buffer[size - 1])))
++  {
++    size--;
++  }
++
++  if (strncmp("off", buffer, size) == 0)
++    *pinAttr->state &= ~pinAttr->mask;
++  else if (strncmp("on1", buffer, size) == 0)
++    *pinAttr->state = (*pinAttr->state & ~pinAttr->mask) | pinAttr->on1;
++  else if (strncmp("on2", buffer, size) == 0)
++    *pinAttr->state = (*pinAttr->state & ~pinAttr->mask) | pinAttr->on2;
++  else
++    ret = -EPERM;
++
++  return ret;
++}
++
++
++static ssize_t board_config_G45_pwm_atmel_show_attr(struct config_item *item,
++    struct configfs_attribute *attr,
++    char *buffer)
++{
++  ssize_t ret = -ENOENT;
++  struct board_config_G45_attribute* myAttr;
++  struct board_config_G45_pwm_atmel_pin_attribute* pinAttr;
++
++  myAttr = container_of(attr, struct board_config_G45_attribute, config_attr);
++
++  switch (myAttr->type)
++  {
++  default:
++    ret = -ENOENT;
++    break;
++  case ReadmeText:
++    ret = board_config_G45_show_readme(item, attr, buffer);
++    break;
++  case PwmAtmelPin:
++    pinAttr = container_of(myAttr, struct board_config_G45_pwm_atmel_pin_attribute, attr);
++    ret = board_config_G45_show_pwm_atmel_pin(item, pinAttr, buffer);
++    break;
++  case EnablePlatformDevice:
++    ret = board_config_G45_show_pdev_state(item, attr, buffer);
++    break;
++  }
++
++  return ret;
++}
++
++static ssize_t board_config_G45_pwm_atmel_store_attr(struct config_item *item,
++    struct configfs_attribute *attr,
++    const char *buffer, size_t size)
++{
++  ssize_t ret = -ENOENT;
++  struct board_config_G45_attribute* myAttr;
++  struct board_config_G45_pwm_atmel_pin_attribute* pinAttr;
++
++  myAttr = container_of(attr, struct board_config_G45_attribute, config_attr);
++
++  switch (myAttr->type)
++  {
++  default:
++    ret = -ENOENT;
++    break;
++  case ReadmeText:
++    ret = -EPERM;
++    break;
++  case PwmAtmelPin:
++    pinAttr = container_of(myAttr, struct board_config_G45_pwm_atmel_pin_attribute, attr);
++    ret = board_config_G45_store_pwm_atmel_pin(item, pinAttr, buffer, size);
++    break;
++  case EnablePlatformDevice:
++    ret = board_config_G45_set_pdev_state(item, attr, buffer, size);
++    break;
++  }
++
++  return ret;
++}
++
++static u32 board_config_G45_pwm_atmel_pin_mask = 0;
++
++static const char board_config_G45_pwm_atmel_readme_text[] =
++    "While the platform device is disabled (file \"enabled\" contains 0)\n"
++    "one can configure the output pins of the PWM device. Most PWMs\n"
++    "can have two alternative output paths. Each PWM can be off or on.\n"
++    "To disable an output pin X (X = 0 .. 3), do:\n"
++    " # echo off >pwmX\n"
++    "To enable an output pin on path 1 or 2, to one of:\n"
++    " # echo on1 >pwmX\n"
++    " # echo on2 >pwmX\n"
++    "\n"
++    "Watch dmesg output, on which I/O pins the PWM output is mapped.\n"
++    "If there is no alternative for the platform device, the device\n"
++    "constructor is responsible for a sensitive default, usually the same\n"
++    "mapping for both, \"on1\" and \"on2\".\n"
++    "\n"
++    "To activate the platform device, write 1 into the enable attribute:\n"
++    " # echo 1 >enable\n";
++
++static struct board_config_G45_readme_attribute board_config_G45_pwm_atmel_readme = {
++    .attr = {
++        .config_attr = {
++          .ca_name = "description",
++          .ca_owner = THIS_MODULE,
++          .ca_mode  = S_IRUGO,
++        },
++        .type = ReadmeText,
++    },
++    .text = board_config_G45_pwm_atmel_readme_text,
++};
++
++static struct board_config_G45_pwm_atmel_pin_attribute board_config_G45_pwm_atmel_pin[] = {
++    {
++        .attr = {
++            .config_attr = {
++              .ca_name = "pwm0",
++              .ca_owner = THIS_MODULE,
++              .ca_mode  = S_IRUGO | S_IWUSR,
++            },
++            .type = PwmAtmelPin,
++        },
++        .on1 = AT91_PWM0,
++        .on2 = AT91_PWM0_ALT,
++        .mask = AT91_PWM0 | AT91_PWM0_ALT,
++        .state = &board_config_G45_pwm_atmel_pin_mask,
++    },
++    {
++        .attr = {
++            .config_attr = {
++              .ca_name = "pwm1",
++              .ca_owner = THIS_MODULE,
++              .ca_mode  = S_IRUGO | S_IWUSR,
++            },
++            .type = PwmAtmelPin,
++        },
++        .on1 = AT91_PWM1,
++        .on2 = AT91_PWM1_ALT,
++        .mask = AT91_PWM1 | AT91_PWM1_ALT,
++        .state = &board_config_G45_pwm_atmel_pin_mask,
++    },
++    {
++        .attr = {
++            .config_attr = {
++              .ca_name = "pwm2",
++              .ca_owner = THIS_MODULE,
++              .ca_mode  = S_IRUGO | S_IWUSR,
++            },
++            .type = PwmAtmelPin,
++        },
++        .on1 = AT91_PWM2,
++        .on2 = AT91_PWM2_ALT,
++        .mask = AT91_PWM2 | AT91_PWM2_ALT,
++        .state = &board_config_G45_pwm_atmel_pin_mask,
++    },
++    {
++        .attr = {
++            .config_attr = {
++              .ca_name = "pwm3",
++              .ca_owner = THIS_MODULE,
++              .ca_mode  = S_IRUGO | S_IWUSR,
++            },
++            .type = PwmAtmelPin,
++        },
++        .on1 = AT91_PWM3,
++        .on2 = AT91_PWM3_ALT,
++        .mask = AT91_PWM3 | AT91_PWM3_ALT,
++        .state = &board_config_G45_pwm_atmel_pin_mask,
++    },
++};
++
++static struct configfs_attribute *board_config_G45_pwm_atmel_attrs[] = {
++    &board_config_G45_pwm_atmel_readme.attr.config_attr,
++    &board_config_G45_pdev_enable.attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[0].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[1].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[2].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[3].attr.config_attr,
++    0 /* sentinel */
++};
++
++static struct configfs_attribute *board_config_G45_pwm_atmel_ro_attrs[] = {
++    &board_config_G45_pwm_atmel_pin[0].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[1].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[2].attr.config_attr,
++    &board_config_G45_pwm_atmel_pin[3].attr.config_attr,
++    0 /* sentinel */
++};
++
++static struct configfs_item_operations board_config_G45_pwm_atmel_item_ops = {
++    .show_attribute = &board_config_G45_pwm_atmel_show_attr,
++    .store_attribute = &board_config_G45_pwm_atmel_store_attr,
++};
++
++static struct config_item_type board_config_G45_pwm_atmel_item_type = {
++    .ct_owner = THIS_MODULE,
++    .ct_item_ops = &board_config_G45_pwm_atmel_item_ops,
++    .ct_attrs = board_config_G45_pwm_atmel_attrs,
++};
++
++static struct board_config_G45_pdev_target board_config_G45_pwm_atmel = { };
++
++static int board_config_G45_pwm_atmel_register_device(struct board_config_G45_pdev_target* target)
++{
++  int ret = 0;
++  pr_devel(CONFIGFS_NAME ": calling at91_add_device_pwm(%04x)\n", board_config_G45_pwm_atmel_pin_mask);
++  target->pdev = at91_add_device_pwm(board_config_G45_pwm_atmel_pin_mask);
++
++  if (IS_ERR(target->pdev))
++  {
++    ret = PTR_ERR(target->pdev);
++    target->pdev = 0;
++  }
++  else if (!target->pdev)
++    ret = -ENODEV;
++
++  return ret;
++}
++
++static void __init board_config_G45_pwm_atmel_init(void)
++{
++  board_config_G45_pwm_atmel.register_device = &board_config_G45_pwm_atmel_register_device;
++  board_config_G45_pwm_atmel.ro_attrs = board_config_G45_pwm_atmel_ro_attrs;
++  board_config_G45_pwm_atmel.config_object.type = PlatformDeviceObject;
++  config_group_init_type_name(&board_config_G45_pwm_atmel.config_object.config_group, "pwm", &board_config_G45_pwm_atmel_item_type);
++
++  pr_info(CONFIGFS_NAME ": registered pwm-atmel platform device for runtime configuration\n");
++}
++
++static void __exit board_config_G45_pwm_atmel_exit(void)
++{
++  if (board_config_G45_pwm_atmel.pdev)
++    platform_device_unregister(board_config_G45_pwm_atmel.pdev);
++}
++#else
++inline static void __init board_config_G45_pwm_atmel_init(void) {}
++inline static void __exit board_config_G45_pwm_atmel_exit(void) {}
++#endif
++
++struct config_group* board_config_G45_subsys_groups[] = {
++#if IS_ENABLED(CONFIG_PWM_ATMEL)
++    &board_config_G45_pwm_atmel.config_object.config_group,
++#endif
++#if IS_ENABLED(CONFIG_SPI_ATMEL)
++    &board_config_G45_spi,
++#endif
++    0 /* sentinel */
++};
++
++static const char board_config_G45_subsys_readme_text[] =
++    "Go to the various board components in this directory and\n"
++    "configure and activate them for use on your board\n"
++    "\n"
++    "They appear here, when the driver is enabled in the kernel\n"
++    "configuration.\n"
++    "Platform drivers may be compiled in or loaded during runtime.\n";
++
++static struct board_config_G45_readme_attribute board_config_G45_subsys_readme_attribute = {
++    .attr = {
++        .config_attr = {
++          .ca_name = "description",
++          .ca_owner = THIS_MODULE,
++          .ca_mode  = S_IRUGO,
++        },
++        .type = ReadmeText,
++    },
++    .text = board_config_G45_subsys_readme_text,
++};
++
++static struct configfs_attribute *board_config_G45_subsys_attrs[] = {
++    &board_config_G45_subsys_readme_attribute.attr.config_attr,
++    0, /* sentinel */
++};
++
++static struct configfs_item_operations board_config_G45_subsys_item_ops = {
++  .show_attribute = &board_config_G45_show_readme,
++};
++
++static struct config_item_type board_config_G45_subsys_type = {
++    .ct_item_ops  = &board_config_G45_subsys_item_ops,
++    .ct_attrs = board_config_G45_subsys_attrs,
++    .ct_owner = THIS_MODULE,
++};
++
++static struct configfs_subsystem board_config_G45_subsys = {
++    .su_group = {
++        .cg_item = {
++            .ci_namebuf = CONFIGFS_NAME,
++            .ci_type = &board_config_G45_subsys_type,
++        },
++        .default_groups = board_config_G45_subsys_groups,
++    },
++};
++
++static int __init board_config_G45_init(void)
++{
++  int ret;
++
++  pr_info(CONFIGFS_NAME " runtime platform device registration loaded\n");
++  pr_devel(CONFIGFS_NAME ": compiled with developer and debug messages\n");
++
++  board_config_G45_pwm_atmel_init();
++  board_config_G45_spi_init();
++
++  config_group_init(&board_config_G45_subsys.su_group);
++  mutex_init(&board_config_G45_subsys.su_mutex);
++  ret = configfs_register_subsystem(&board_config_G45_subsys);
++  if (ret) {
++    pr_err(CONFIGFS_NAME "Error %d while registering subsystem %s\n",
++        ret,
++        board_config_G45_subsys.su_group.cg_item.ci_namebuf);
++    goto out_unregister;
++  }
++
++  return 0;
++
++out_unregister:
++  configfs_unregister_subsystem(&board_config_G45_subsys);
++
++  return ret;
++}
++
++static void __exit board_config_G45_exit(void)
++{
++  board_config_G45_spi_exit();
++  board_config_G45_pwm_atmel_exit();
++
++  configfs_unregister_subsystem(&board_config_G45_subsys);
++  pr_info(CONFIGFS_NAME " runtime platform device registration removed\n");
++}
++
++module_init(board_config_G45_init);
++module_exit(board_config_G45_exit);
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Johannes Lode <linuxer>@quantentunnel.de");
++MODULE_DESCRIPTION("Runtime board configuration for AT91SAM9G45. Use the configFS directory " CONFIGFS_NAME " for\n"
++                   "configuration of board dependent features of the SoC.");
+--- a/arch/arm/mach-at91/Kconfig.non_dt
++++ b/arch/arm/mach-at91/Kconfig.non_dt
+@@ -353,4 +353,17 @@ config MTD_AT91_DATAFLASH_CARD
+ 	help
+ 	  Enable support for the DataFlash card.
+ 
++config MACH_AT91SAM9G45_CONFIG
++    tristate "AT91SAM9G45 configFS platform device configuration"
++    default n
++    depends on ARCH_AT91SAM9G45 && !MACH_AT91SAM9M10G45EK
++    select CONFIGFS_FS
++    help
++      This selects the runtime platform device configuration via configFS. This way
++      you may avoid the hassle of writing your own board file inside the kernel tree.
++
++      Here you configure support for various platform devices, supported by the
++      SoC of AT91SAM9G45 or AT91SAM9M10 families:
++      AT91SAM9G45, AT91SAM9G46, AT91SAM9M10 and AT91SAM9M11.
++
+ endmenu
+--- a/arch/arm/mach-at91/Makefile
++++ b/arch/arm/mach-at91/Makefile
+@@ -80,6 +80,8 @@ obj-$(CONFIG_MACH_SNAPPER_9260)	+= board
+ 
+ # AT91SAM9G45 board-specific support
+ obj-$(CONFIG_MACH_AT91SAM9M10G45EK) += board-sam9m10g45ek.o
++obj-$(CONFIG_MACH_AT91SAM9G45_CONFIG)	+= configfs-at91sam9g45.o
++configfs-at91sam9g45-objs := board-configfs-at91sam9g45.o at91sam9g45_devices.o
+ 
+ # AT91SAM board with device-tree
+ obj-$(CONFIG_MACH_AT91RM9200_DT) += board-dt-rm9200.o
+--- a/arch/arm/mach-at91/gpio.c
++++ b/arch/arm/mach-at91/gpio.c
+@@ -141,7 +141,7 @@ static char peripheral_function(void __i
+ /*
+  * mux the pin to the "GPIO" peripheral role.
+  */
+-int __init_or_module at91_set_GPIO_periph(unsigned pin, int use_pullup)
++int at91_set_GPIO_periph(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -159,7 +159,7 @@ EXPORT_SYMBOL(at91_set_GPIO_periph);
+ /*
+  * mux the pin to the "A" internal peripheral role.
+  */
+-int __init_or_module at91_set_A_periph(unsigned pin, int use_pullup)
++int at91_set_A_periph(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -186,7 +186,7 @@ EXPORT_SYMBOL(at91_set_A_periph);
+ /*
+  * mux the pin to the "B" internal peripheral role.
+  */
+-int __init_or_module at91_set_B_periph(unsigned pin, int use_pullup)
++int at91_set_B_periph(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -213,7 +213,7 @@ EXPORT_SYMBOL(at91_set_B_periph);
+ /*
+  * mux the pin to the "C" internal peripheral role.
+  */
+-int __init_or_module at91_set_C_periph(unsigned pin, int use_pullup)
++int at91_set_C_periph(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -234,7 +234,7 @@ EXPORT_SYMBOL(at91_set_C_periph);
+ /*
+  * mux the pin to the "D" internal peripheral role.
+  */
+-int __init_or_module at91_set_D_periph(unsigned pin, int use_pullup)
++int at91_set_D_periph(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -256,7 +256,7 @@ EXPORT_SYMBOL(at91_set_D_periph);
+  * mux the pin to the gpio controller (instead of "A", "B", "C"
+  * or "D" peripheral), and configure it for an input.
+  */
+-int __init_or_module at91_set_gpio_input(unsigned pin, int use_pullup)
++int at91_set_gpio_input(unsigned pin, int use_pullup)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -277,7 +277,7 @@ EXPORT_SYMBOL(at91_set_gpio_input);
+  * mux the pin to the gpio controller (instead of "A", "B", "C"
+  * or "D" peripheral), and configure it for an output.
+  */
+-int __init_or_module at91_set_gpio_output(unsigned pin, int value)
++int at91_set_gpio_output(unsigned pin, int value)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -298,7 +298,7 @@ EXPORT_SYMBOL(at91_set_gpio_output);
+ /*
+  * enable/disable the glitch filter; mostly used with IRQ handling.
+  */
+-int __init_or_module at91_set_deglitch(unsigned pin, int is_on)
++int at91_set_deglitch(unsigned pin, int is_on)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -316,7 +316,7 @@ EXPORT_SYMBOL(at91_set_deglitch);
+ /*
+  * enable/disable the debounce filter;
+  */
+-int __init_or_module at91_set_debounce(unsigned pin, int is_on, int div)
++int at91_set_debounce(unsigned pin, int is_on, int div)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -339,7 +339,7 @@ EXPORT_SYMBOL(at91_set_debounce);
+  * enable/disable the multi-driver; This is only valid for output and
+  * allows the output pin to run as an open collector output.
+  */
+-int __init_or_module at91_set_multi_drive(unsigned pin, int is_on)
++int at91_set_multi_drive(unsigned pin, int is_on)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -356,7 +356,7 @@ EXPORT_SYMBOL(at91_set_multi_drive);
+  * enable/disable the pull-down.
+  * If pull-up already enabled while calling the function, we disable it.
+  */
+-int __init_or_module at91_set_pulldown(unsigned pin, int is_on)
++int at91_set_pulldown(unsigned pin, int is_on)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+@@ -374,7 +374,7 @@ EXPORT_SYMBOL(at91_set_pulldown);
+ /*
+  * disable Schmitt trigger
+  */
+-int __init_or_module at91_disable_schmitt_trig(unsigned pin)
++int at91_disable_schmitt_trig(unsigned pin)
+ {
+ 	void __iomem	*pio = pin_to_controller(pin);
+ 	unsigned	mask = pin_to_mask(pin);
+--- a/arch/arm/mach-at91/board.h
++++ b/arch/arm/mach-at91/board.h
+@@ -63,7 +63,7 @@ extern void __init at91_add_device_i2c(s
+ #endif
+ 
+  /* SPI */
+-extern void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices);
++extern void at91_add_device_spi(struct spi_board_info *devices, int nr_devices);
+ 
+  /* Serial */
+ #define ATMEL_UART_CTS	0x01
+@@ -73,7 +73,7 @@ extern void __init at91_add_device_spi(s
+ #define ATMEL_UART_DCD	0x10
+ #define ATMEL_UART_RI	0x20
+ 
+-extern void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins);
++extern void at91_register_uart(unsigned id, unsigned portnr, unsigned pins);
+ 
+ extern struct platform_device *atmel_default_console_device;
+ 
+@@ -91,7 +91,7 @@ extern void __init at91_add_device_seria
+ #define AT91_PWM3     (1 << 6)
+ #define AT91_PWM3_ALT (1 << 7)
+ 
+-extern struct platform_device * __init at91_add_device_pwm(u32 mask);
++extern struct platform_device * at91_add_device_pwm(u32 mask);
+ 
+ /*
+  * SSC -- accessed through ssc_request(id).  Drivers don't bind to SSC
+--- a/arch/arm/mach-at91/include/mach/gpio.h
++++ b/arch/arm/mach-at91/include/mach/gpio.h
+@@ -188,18 +188,18 @@
+ 
+ #ifndef __ASSEMBLY__
+ /* setup setup routines, called from board init or driver probe() */
+-extern int __init_or_module at91_set_GPIO_periph(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_A_periph(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_B_periph(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_C_periph(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_D_periph(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_gpio_input(unsigned pin, int use_pullup);
+-extern int __init_or_module at91_set_gpio_output(unsigned pin, int value);
+-extern int __init_or_module at91_set_deglitch(unsigned pin, int is_on);
+-extern int __init_or_module at91_set_debounce(unsigned pin, int is_on, int div);
+-extern int __init_or_module at91_set_multi_drive(unsigned pin, int is_on);
+-extern int __init_or_module at91_set_pulldown(unsigned pin, int is_on);
+-extern int __init_or_module at91_disable_schmitt_trig(unsigned pin);
++extern int at91_set_GPIO_periph(unsigned pin, int use_pullup);
++extern int at91_set_A_periph(unsigned pin, int use_pullup);
++extern int at91_set_B_periph(unsigned pin, int use_pullup);
++extern int at91_set_C_periph(unsigned pin, int use_pullup);
++extern int at91_set_D_periph(unsigned pin, int use_pullup);
++extern int at91_set_gpio_input(unsigned pin, int use_pullup);
++extern int at91_set_gpio_output(unsigned pin, int value);
++extern int at91_set_deglitch(unsigned pin, int is_on);
++extern int at91_set_debounce(unsigned pin, int is_on, int div);
++extern int at91_set_multi_drive(unsigned pin, int is_on);
++extern int at91_set_pulldown(unsigned pin, int is_on);
++extern int at91_disable_schmitt_trig(unsigned pin);
+ 
+ /* callable at any time */
+ extern int at91_set_gpio_value(unsigned pin, int value);
+--- a/arch/arm/mach-at91/at91sam9g45_devices.c
++++ b/arch/arm/mach-at91/at91sam9g45_devices.c
+@@ -41,6 +41,14 @@
+ #include "clock.h"
+ 
+ 
++#ifdef ECLIPSE_EDITOR
++#warning "hey Alter, nimm die Editor-Hilfe aus dem Quelltext"
++#define __init
++#define __exit
++#define IS_ENABLED(x) (1)
++#define KERN_ERR
++#endif
++
+ /* --------------------------------------------------------------------
+  *  HDMAC - AHB DMA Controller
+  * -------------------------------------------------------------------- */
+@@ -469,7 +477,7 @@ void __init at91_add_device_mci(short mm
+ 
+ 		/* DAT0, maybe DAT1..DAT3 and maybe DAT4..DAT7 */
+ 		at91_set_A_periph(AT91_PIN_PA2, 1);
+-		if (data->slot[0].bus_width == 4) {
++		if (data->slot[0].bus_width >= 4) {
+ 			at91_set_A_periph(AT91_PIN_PA3, 1);
+ 			at91_set_A_periph(AT91_PIN_PA4, 1);
+ 			at91_set_A_periph(AT91_PIN_PA5, 1);
+@@ -494,7 +502,7 @@ void __init at91_add_device_mci(short mm
+ 
+ 		/* DAT0, maybe DAT1..DAT3 and maybe DAT4..DAT7 */
+ 		at91_set_A_periph(AT91_PIN_PA23, 1);
+-		if (data->slot[0].bus_width == 4) {
++		if (data->slot[0].bus_width >= 4) {
+ 			at91_set_A_periph(AT91_PIN_PA24, 1);
+ 			at91_set_A_periph(AT91_PIN_PA25, 1);
+ 			at91_set_A_periph(AT91_PIN_PA26, 1);
+@@ -706,7 +714,7 @@ void __init at91_add_device_i2c(short i2
+  *  SPI
+  * -------------------------------------------------------------------- */
+ 
+-#if defined(CONFIG_SPI_ATMEL) || defined(CONFIG_SPI_ATMEL_MODULE)
++#if IS_ENABLED(CONFIG_SPI_ATMEL)
+ static u64 spi_dmamask = DMA_BIT_MASK(32);
+ 
+ static struct resource spi0_resources[] = {
+@@ -761,7 +769,10 @@ static struct platform_device at91sam9g4
+ 
+ static const unsigned spi1_standard_cs[4] = { AT91_PIN_PB17, AT91_PIN_PD28, AT91_PIN_PD18, AT91_PIN_PD19 };
+ 
+-void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
++static bool spi0_enabled = false;
++static bool spi1_enabled = false;
++
++void at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
+ {
+ 	int i;
+ 	unsigned long cs_pin;
+@@ -770,7 +781,7 @@ void __init at91_add_device_spi(struct s
+ 
+ 	/* Choose SPI chip-selects */
+ 	for (i = 0; i < nr_devices; i++) {
+-		if (devices[i].controller_data)
++		if (devices[i].controller_data) // FIXME: GPIO pin 0 is not usable for chip select
+ 			cs_pin = (unsigned long) devices[i].controller_data;
+ 		else if (devices[i].bus_num == 0)
+ 			cs_pin = spi0_standard_cs[devices[i].chip_select];
+@@ -786,7 +797,7 @@ void __init at91_add_device_spi(struct s
+ 			enable_spi1 = 1;
+ 
+ 		/* enable chip-select pin */
+-		at91_set_gpio_output(cs_pin, 1);
++		at91_set_gpio_output(cs_pin, (devices[i].mode & SPI_CS_HIGH) ? 0 : 1);
+ 
+ 		/* pass chip-select pin to driver */
+ 		devices[i].controller_data = (void *) cs_pin;
+@@ -795,14 +806,18 @@ void __init at91_add_device_spi(struct s
+ 	spi_register_board_info(devices, nr_devices);
+ 
+ 	/* Configure SPI bus(es) */
+-	if (enable_spi0) {
++	if (!spi0_enabled && enable_spi0) {
++	  spi0_enabled = true;
++
+ 		at91_set_A_periph(AT91_PIN_PB0, 0);	/* SPI0_MISO */
+ 		at91_set_A_periph(AT91_PIN_PB1, 0);	/* SPI0_MOSI */
+ 		at91_set_A_periph(AT91_PIN_PB2, 0);	/* SPI0_SPCK */
+ 
+ 		platform_device_register(&at91sam9g45_spi0_device);
+ 	}
+-	if (enable_spi1) {
++	if (!spi1_enabled && enable_spi1) {
++    spi1_enabled = true;
++
+ 		at91_set_A_periph(AT91_PIN_PB14, 0);	/* SPI1_MISO */
+ 		at91_set_A_periph(AT91_PIN_PB15, 0);	/* SPI1_MOSI */
+ 		at91_set_A_periph(AT91_PIN_PB16, 0);	/* SPI1_SPCK */
+@@ -811,9 +826,9 @@ void __init at91_add_device_spi(struct s
+ 	}
+ }
+ #else
+-void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices) {}
++void at91_add_device_spi(struct spi_board_info *devices, int nr_devices) {}
+ #endif
+-
++EXPORT_SYMBOL(at91_add_device_spi);
+ 
+ /* --------------------------------------------------------------------
+  *  AC97
+@@ -1102,7 +1117,7 @@ static void __init at91_add_device_tc(vo
+  *  RTC
+  * -------------------------------------------------------------------- */
+ 
+-#if defined(CONFIG_RTC_DRV_AT91RM9200) || defined(CONFIG_RTC_DRV_AT91RM9200_MODULE)
++#if IS_ENABLED(CONFIG_RTC_DRV_AT91RM9200)
+ static struct resource rtc_resources[] = {
+ 	[0] = {
+ 		.start	= AT91SAM9G45_BASE_RTC,
+@@ -1337,7 +1352,7 @@ static void __init at91_add_device_rtt(v
+  *  TRNG
+  * -------------------------------------------------------------------- */
+ 
+-#if defined(CONFIG_HW_RANDOM_ATMEL) || defined(CONFIG_HW_RANDOM_ATMEL_MODULE)
++#if IS_ENABLED(CONFIG_HW_RANDOM_ATMEL)
+ static struct resource trng_resources[] = {
+ 	{
+ 		.start	= AT91SAM9G45_BASE_TRNG,
+@@ -1365,7 +1380,7 @@ static void __init at91_add_device_trng(
+  *  Watchdog
+  * -------------------------------------------------------------------- */
+ 
+-#if defined(CONFIG_AT91SAM9X_WATCHDOG) || defined(CONFIG_AT91SAM9X_WATCHDOG_MODULE)
++#if IS_ENABLED(CONFIG_AT91SAM9X_WATCHDOG)
+ static struct resource wdt_resources[] = {
+ 	{
+ 		.start	= AT91SAM9G45_BASE_WDT,
+@@ -1418,7 +1433,7 @@ static struct platform_device_info at91s
+ 	.data = &at91sam9g45_pwm0_config_mask,
+ };
+ 
+-struct platform_device * __init at91_add_device_pwm(u32 mask)
++struct platform_device * at91_add_device_pwm(u32 mask)
+ {
+   at91sam9g45_pwm0_config_mask = mask;
+ 
+@@ -1469,9 +1484,9 @@ struct platform_device * __init at91_add
+ 	return platform_device_register_full(&at91sam9g45_pwm0_device_info);
+ }
+ #else
+-struct platform_device * __init at91_add_device_pwm(u32 mask) { return ERR_PTR(-ENODEV); }
++struct platform_device * at91_add_device_pwm(u32 mask) { return ERR_PTR(-ENODEV); }
+ #endif
+-
++EXPORT_SYMBOL(at91_add_device_pwm);
+ 
+ /* --------------------------------------------------------------------
+  *  SSC -- Synchronous Serial Controller
+@@ -1812,9 +1827,7 @@ static inline void configure_usart3_pins
+ 		at91_set_B_periph(AT91_PIN_PA24, 0);	/* CTS3 */
+ }
+ 
+-static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+-
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
+ {
+ 	struct platform_device *pdev;
+ 	struct atmel_uart_data *pdata;
+@@ -1846,23 +1859,14 @@ void __init at91_register_uart(unsigned
+ 	pdata = pdev->dev.platform_data;
+ 	pdata->num = portnr;		/* update to mapped ID */
+ 
+-	if (portnr < ATMEL_MAX_UART)
+-		at91_uarts[portnr] = pdev;
+-}
+-
+-void __init at91_add_device_serial(void)
+-{
+-	int i;
+-
+-	for (i = 0; i < ATMEL_MAX_UART; i++) {
+-		if (at91_uarts[i])
+-			platform_device_register(at91_uarts[i]);
+-	}
++  platform_device_register(pdev);
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
+-void __init at91_add_device_serial(void) {}
++void at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
+ #endif
++EXPORT_SYMBOL(at91_register_uart);
++
++void __init at91_add_device_serial(void) {}
+ 
+ /* --------------------------------------------------------------------
+  *  SHA1/SHA256

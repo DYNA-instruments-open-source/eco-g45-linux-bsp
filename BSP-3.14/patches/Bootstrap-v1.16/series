@@ -1,0 +1,8 @@
+0001-add-lpddr-support.patch
+0002-fix-wrong-codesize-in-exception-vectors.patch
+0003-add-nand-ids-STMNAND.patch
+0004-fix-nand-driver.patch
+0005-fix-linker-script.patch
+1000-add-eco-g45-board.patch
+1001-add-lauterbach-nand-algorthms.patch
+1002-add-lauterbach-nand-update-script.patch

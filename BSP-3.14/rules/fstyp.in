@@ -1,0 +1,7 @@
+## SECTION=disk_and_file
+
+config FSTYP
+	tristate
+	prompt "fstyp"
+	help
+	  FIXME

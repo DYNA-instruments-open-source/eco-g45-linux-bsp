@@ -1,0 +1,19 @@
+Index: linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+===================================================================
+--- linux-2.6.33.orig/drivers/dma/ipu/ipu_idmac.c
++++ linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+@@ -1856,12 +1856,13 @@ static struct platform_driver ipu_platfo
+ 		.name	= "ipu-core",
+ 		.owner	= THIS_MODULE,
+ 	},
++	.probe		= ipu_probe,
+ 	.remove		= __exit_p(ipu_remove),
+ };
+ 
+ static int __init ipu_init(void)
+ {
+-	return platform_driver_probe(&ipu_platform_driver, ipu_probe);
++	return platform_driver_register(&ipu_platform_driver);
+ }
+ subsys_initcall(ipu_init);
+ 

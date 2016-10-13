@@ -1,0 +1,185 @@
+Index: tslib-1.0/plugins/crop.c
+===================================================================
+--- /dev/null
++++ tslib-1.0/plugins/crop.c
+@@ -0,0 +1,124 @@
++/*
++ *  tslib/plugins/crop.c
++ *
++ *  Copyright (C) 2012 Garz & Fricke GmbH.
++ *
++ * This file is placed under the LGPL. Please see the file
++ * COPYING for more details.
++ *
++ * $Id: tslib_add_crop_filter.patch 1470 2012-06-04 17:29:25Z carsten.behling $
++ *
++ * Crop scaled touch coordinates to the screen borders.
++ * This module needs the guf_xml driver to work, because it
++ * reads the screen resolution from /sys/class/misc/guf_xml/
++ * configurationFile/variables/display.
++ */
++
++#include <stdlib.h>
++#include <string.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <fcntl.h>
++
++#include <stdio.h>
++
++#include "tslib.h"
++#include "tslib-filter.h"
++
++#define XRES_FILE "/sys/class/misc/guf_xml/configurationFile/variables/display/xres"
++#define YRES_FILE "/sys/class/misc/guf_xml/configurationFile/variables/display/yres"
++
++struct tslib_crop {
++	struct tslib_module_info module;
++	int xres;
++	int yres;
++};
++
++static int
++crop_read(struct tslib_module_info *info, struct ts_sample *samp, int nr)
++{
++	struct tslib_crop *crop = (struct tslib_crop *)info;
++	int ret;
++
++	ret = info->next->ops->read(info->next, samp, nr);
++	if (ret >= 0) {
++		int nr;
++
++		for (nr = 0; nr < ret; nr++, samp++) {
++			if (samp->x < 0)
++				samp->x = 0;
++			else if (samp->x >= crop->xres)
++				samp->x = crop->xres - 1;
++
++			if (samp->y < 0)
++				samp->y = 0;
++			else if (samp->y >= crop->yres)
++				samp->y = crop->yres - 1;
++		}
++	}
++
++	return ret;
++}
++
++static int crop_fini(struct tslib_module_info *info)
++{
++	free(info);
++	return 0;
++}
++
++static const struct tslib_ops crop_ops =
++{
++	.read	= crop_read,
++	.fini	= crop_fini,
++};
++
++TSAPI struct tslib_module_info *mod_init(struct tsdev *dev, const char *params)
++{
++	struct tslib_crop *crop;
++	int fdx = -1, fdy = -1;
++	int count;
++	char str[6];
++
++	crop = malloc(sizeof(struct tslib_crop));
++	if (crop == NULL)
++		return NULL;
++
++	crop->module.ops = &crop_ops;
++
++	fdx = open(XRES_FILE, O_RDONLY);
++	fdy = open(YRES_FILE, O_RDONLY);
++	if (fdx < 0 || fdy < 0)
++		goto error;
++
++	if (read(fdx, str, 6) > 0)
++	{
++		crop->xres = atoi(str);
++		if (crop->xres == 0)
++			goto error;
++	}
++	else
++		goto error;
++
++	if (read(fdy, str, 6) > 0)
++	{
++		crop->yres = atoi(str);
++		if (crop->yres == 0)
++			goto error;
++	}
++	else
++		goto error;
++
++#ifdef DEBUG
++	printf("crop: Screen resolution %dx%d\n", crop->xres, crop->yres);
++#endif
++	return &crop->module;
++
++error:
++	if (fdx >= 0)
++		close(fdx);
++	if (fdy >= 0)
++		close(fdy);
++	printf("crop: Could not determine screen resolution!\n");
++	return NULL;
++}
+Index: tslib-1.0/configure.ac
+===================================================================
+--- tslib-1.0.orig/configure.ac
++++ tslib-1.0/configure.ac
+@@ -97,6 +97,15 @@ AC_ARG_ENABLE(mean,
+ AC_MSG_RESULT($mean_module)
+ AM_CONDITIONAL(ENABLE_MEAN_MODULE, test "$mean_module" = "yes")
+ 
++AC_MSG_CHECKING([whether crop module is requested])
++AC_ARG_ENABLE(crop,
++	AS_HELP_STRING([--enable-crop],
++		[Enable building of crop filter (default=yes)]),
++	[crop_module=$enableval],
++	[crop_module=yes])
++AC_MSG_RESULT($crop_module)
++AM_CONDITIONAL(ENABLE_CROP_MODULE, test "$crop_module" = "yes")
++
+ AC_MSG_CHECKING([whether dejitter module is requested]) 
+ AC_ARG_ENABLE(dejitter,
+ 	AS_HELP_STRING([--enable-dejitter],
+Index: tslib-1.0/plugins/Makefile.am
+===================================================================
+--- tslib-1.0.orig/plugins/Makefile.am
++++ tslib-1.0/plugins/Makefile.am
+@@ -127,6 +127,12 @@ else
+ MEAN_MODULE =
+ endif
+ 
++if ENABLE_CROP_MODULE
++CROP_MODULE = crop.la
++else
++CROP_MODULE =
++endif
++
+ if ENABLE_H2200_LINEAR_MODULE
+ H2200_LINEAR_MODULE = linear_h2200.la
+ else
+@@ -148,6 +154,7 @@ pluginexec_LTLIBRARIES = \
+ 	$(ARCTIC2_MODULE) \
+ 	$(MEDIAN_MODULE) \
+ 	$(MEAN_MODULE) \
++	$(CROP_MODULE) \
+ 	$(DMC_MODULE) \
+ 	$(H2200_LINEAR_MODULE) \
+ 	$(INPUT_MODULE) \
+@@ -175,6 +182,10 @@ mean_la_SOURCES	= mean.c
+ mean_la_LDFLAGS	= -module $(LTVSN)
+ mean_la_LIBADD	= $(top_builddir)/src/libts.la
+ 
++crop_la_SOURCES		= crop.c
++crop_la_LDFLAGS		= -module $(LTVSN)
++crop_la_LIBADD		= $(top_builddir)/src/libts.la
++
+ pthres_la_SOURCES	= pthres.c
+ pthres_la_LDFLAGS	= -module $(LTVSN)
+ 

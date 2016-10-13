@@ -1,0 +1,7 @@
+## SECTION=test_suites
+
+config EVTEST
+	tristate
+	prompt "evtest"
+	help
+	  FIXME

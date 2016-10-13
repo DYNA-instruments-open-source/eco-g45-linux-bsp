@@ -1,0 +1,154 @@
+Index: linux-2.6.39/include/linux/backlight.h
+===================================================================
+--- linux-2.6.39.orig/include/linux/backlight.h
++++ linux-2.6.39/include/linux/backlight.h
+@@ -117,6 +117,8 @@ extern struct backlight_device *backligh
+ extern void backlight_device_unregister(struct backlight_device *bd);
+ extern void backlight_force_update(struct backlight_device *bd,
+ 				   enum backlight_update_reason reason);
++extern unsigned long backlight_get_power(struct device *dev);
++extern int backlight_set_power(struct device *dev, unsigned long power);
+ 
+ #define to_backlight_device(obj) container_of(obj, struct backlight_device, dev)
+ 
+Index: linux-2.6.39/drivers/video/backlight/backlight.c
+===================================================================
+--- linux-2.6.39.orig/drivers/video/backlight/backlight.c
++++ linux-2.6.39/drivers/video/backlight/backlight.c
+@@ -9,7 +9,6 @@
+ #include <linux/init.h>
+ #include <linux/device.h>
+ #include <linux/backlight.h>
+-#include <linux/notifier.h>
+ #include <linux/ctype.h>
+ #include <linux/err.h>
+ #include <linux/fb.h>
+@@ -18,6 +17,16 @@
+ #ifdef CONFIG_PMAC_BACKLIGHT
+ #include <asm/backlight.h>
+ #endif
++#ifdef CONFIG_BACKLIGHT_ATMEL_PWM
++#include <linux/atmel_pwm.h>
++struct atmel_pwm_bl {
++	const struct atmel_pwm_bl_platform_data	*pdata;
++	struct backlight_device *bldev;
++	struct platform_device *pdev;
++	struct pwm_channel pwmc;
++	int gpio_on;
++};
++#endif
+ 
+ static const char const *backlight_types[] = {
+ 	[BACKLIGHT_RAW] = "raw",
+@@ -25,60 +34,44 @@ static const char const *backlight_types
+ 	[BACKLIGHT_FIRMWARE] = "firmware",
+ };
+ 
+-#if defined(CONFIG_FB) || (defined(CONFIG_FB_MODULE) && \
+-			   defined(CONFIG_BACKLIGHT_CLASS_DEVICE_MODULE))
+-/* This callback gets called when something important happens inside a
+- * framebuffer driver. We're looking if that important event is blanking,
+- * and if it is, we're switching backlight power as well ...
+- */
+-static int fb_notifier_callback(struct notifier_block *self,
+-				unsigned long event, void *data)
++unsigned long backlight_get_power(struct device *dev)
+ {
+-	struct backlight_device *bd;
+-	struct fb_event *evdata = data;
+-
+-	/* If we aren't interested in this event, skip it immediately ... */
+-	if (event != FB_EVENT_BLANK && event != FB_EVENT_CONBLANK)
+-		return 0;
+-
+-	bd = container_of(self, struct backlight_device, fb_notif);
+-	mutex_lock(&bd->ops_lock);
+-	if (bd->ops)
+-		if (!bd->ops->check_fb ||
+-		    bd->ops->check_fb(bd, evdata->info)) {
+-			bd->props.fb_blank = *(int *)evdata->data;
+-			if (bd->props.fb_blank == FB_BLANK_UNBLANK)
+-				bd->props.state &= ~BL_CORE_FBBLANK;
+-			else
+-				bd->props.state |= BL_CORE_FBBLANK;
+-			backlight_update_status(bd);
+-		}
+-	mutex_unlock(&bd->ops_lock);
+-	return 0;
++	struct platform_device *pd = to_platform_device(dev);
++#ifdef CONFIG_BACKLIGHT_ATMEL_PWM
++	struct atmel_pwm_bl *pwmbl =  platform_get_drvdata(pd);
++	struct backlight_device *bd =pwmbl->bldev;
++#else
++	struct backlight_device *bd = platform_get_drvdata(pd);
++#endif
++	if (bd)
++		return bd->props.power;
++	else
++		return ENODATA;
+ }
+ 
+-static int backlight_register_fb(struct backlight_device *bd)
+-{
+-	memset(&bd->fb_notif, 0, sizeof(bd->fb_notif));
+-	bd->fb_notif.notifier_call = fb_notifier_callback;
+-
+-	return fb_register_client(&bd->fb_notif);
+-}
++EXPORT_SYMBOL(backlight_get_power);
+ 
+-static void backlight_unregister_fb(struct backlight_device *bd)
++int backlight_set_power(struct device *dev, unsigned long power)
+ {
+-	fb_unregister_client(&bd->fb_notif);
+-}
++	struct platform_device *pd = to_platform_device(dev);
++#ifdef CONFIG_BACKLIGHT_ATMEL_PWM
++	struct atmel_pwm_bl *pwmbl =  platform_get_drvdata(pd);
++	struct backlight_device *bd =pwmbl->bldev;
+ #else
+-static inline int backlight_register_fb(struct backlight_device *bd)
+-{
+-	return 0;
++	struct backlight_device *bd = platform_get_drvdata(pd);
++#endif
++	if (bd)
++	{
++		pr_debug("backlight: set power to %lu\n", power);
++		bd->props.power = power;
++		backlight_update_status(bd);
++		return 0;
++	}
++	else
++		return ENODATA;
+ }
+ 
+-static inline void backlight_unregister_fb(struct backlight_device *bd)
+-{
+-}
+-#endif /* CONFIG_FB */
++EXPORT_SYMBOL(backlight_set_power);
+ 
+ static void backlight_generate_event(struct backlight_device *bd,
+ 				     enum backlight_update_reason reason)
+@@ -324,12 +317,6 @@ struct backlight_device *backlight_devic
+ 		return ERR_PTR(rc);
+ 	}
+ 
+-	rc = backlight_register_fb(new_bd);
+-	if (rc) {
+-		device_unregister(&new_bd->dev);
+-		return ERR_PTR(rc);
+-	}
+-
+ 	new_bd->ops = ops;
+ 
+ #ifdef CONFIG_PMAC_BACKLIGHT
+@@ -364,7 +351,6 @@ void backlight_device_unregister(struct
+ 	bd->ops = NULL;
+ 	mutex_unlock(&bd->ops_lock);
+ 
+-	backlight_unregister_fb(bd);
+ 	device_unregister(&bd->dev);
+ }
+ EXPORT_SYMBOL(backlight_device_unregister);

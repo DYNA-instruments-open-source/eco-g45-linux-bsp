@@ -1,0 +1,17 @@
+#!/bin/sh
+
+. /etc/profile
+
+case "$1" in
+start)
+	start-stop-daemon -m -p /var/run/classpath-awt-demo.pid -b -a /usr/bin/jamvm -S -- -Dawt.toolkit=gnu.java.awt.peer.qt.QtToolkit -Dqtoptions.qws=true -classpath /usr/share/classpath/examples/examples.zip gnu.classpath.examples.awt.Demo
+	;;
+stop)
+	start-stop-daemon -p /var/run/classpath-awt-demo.pid -K
+	;;
+*)
+	echo "Usage: /etc/init.d/classpath-awt-demo {start|stop}" >&2
+	exit 1
+	;;
+esac
+

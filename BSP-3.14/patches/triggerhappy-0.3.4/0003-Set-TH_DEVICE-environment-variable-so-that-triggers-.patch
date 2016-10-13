@@ -1,0 +1,26 @@
+From d7147021fc83b51239de3be17ea157d664dd7401 Mon Sep 17 00:00:00 2001
+From: Julien Muchembled <jm-dbfllLguqzPsq35pWSNszA (AT) public (DOT) gmane.org>
+Date: Sun, 22 May 2011 14:14:47 +0200
+Subject: [PATCH 3/4] Set TH_DEVICE environment variable so that triggers know
+ the origin of an event
+
+---
+ trigger.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/trigger.c b/trigger.c
+index bcae1e1..88253e1 100644
+--- a/trigger.c
++++ b/trigger.c
+@@ -216,6 +216,7 @@ void run_triggers(int type, int code, int value, keystate_holder ksh, device *de
+ 				int pid = fork();
+ 				if (pid == 0 ) {
+ 					/* adjust environment */
++					setenv( "TH_DEVICE", dev->devname, 1 );
+ 					setenv( "TH_KEYSTATE", get_keystate(ksh), 1 );
+ 					const char *en = lookup_event_name_i( et->type, et->code );
+ 					setenv( "TH_EVENT", en, 1 );
+
+--
+2.1.1
+

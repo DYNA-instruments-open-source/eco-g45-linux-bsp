@@ -1,0 +1,7 @@
+# The touch reports via event input system
+module_raw input
+module pthres pmin=1
+module median depth=5
+module lowpass
+module mean depth=10
+module linear

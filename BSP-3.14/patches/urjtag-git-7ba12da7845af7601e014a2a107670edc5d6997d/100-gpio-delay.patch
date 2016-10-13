@@ -1,0 +1,39 @@
+--- a/src/tap/cable/gpio.c
++++ b/src/tap/cable/gpio.c
+@@ -305,6 +305,7 @@ gpio_clock (urj_cable_t *cable, int tms,
+ {
+     gpio_params_t *p = cable->params;
+     int i;
++    volatile uint32_t cnt;
+ 
+     tms = tms ? 1 : 0;
+     tdi = tdi ? 1 : 0;
+@@ -312,12 +313,28 @@ gpio_clock (urj_cable_t *cable, int tms,
+     gpio_set_value (p->fd_gpios[GPIO_TMS], tms);
+     gpio_set_value (p->fd_gpios[GPIO_TDI], tdi);
+ 
++    if (cable->delay)
++    {
++        for (i = 0; i < n; i++)
++        {
++            gpio_set_value (p->fd_gpios[GPIO_TCK], 0);
++            gpio_set_value (p->fd_gpios[GPIO_TCK], 1);
++            for (cnt = cable->delay; cnt > 0;)
++                cnt--;
++            gpio_set_value (p->fd_gpios[GPIO_TCK], 0);
++            for (cnt = cable->delay; cnt > 0;)
++                cnt--;
++        }
++    }
++    else
++    {
+     for (i = 0; i < n; i++)
+     {
+         gpio_set_value (p->fd_gpios[GPIO_TCK], 0);
+         gpio_set_value (p->fd_gpios[GPIO_TCK], 1);
+         gpio_set_value (p->fd_gpios[GPIO_TCK], 0);
+     }
++    }
+ }
+ 
+ static int

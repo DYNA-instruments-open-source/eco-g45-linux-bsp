@@ -1,0 +1,28 @@
+From aac9f353a28c0f414b27ac54bbbb2292c152eedc Mon Sep 17 00:00:00 2001
+From: Stefan Tomanek <stefan.tomanek-cGRI6YpkiDPUTce7r8oAew (AT) public (DOT) gmane.org>
+Date: Tue, 14 Feb 2012 00:23:57 +0100
+Subject: [PATCH 4/4] remove leading whitespaces from command lines
+
+---
+ triggerparser.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/triggerparser.c b/triggerparser.c
+index 3b1e825..d89302b 100644
+--- a/triggerparser.c
++++ b/triggerparser.c
+@@ -111,6 +111,10 @@ trigger* parse_trigger(char* line) {
+ 			end --;
+ 		}
+ 		*(end+1) = '\0';
++ 		/* remove leading whitespaces as well */
++		while (isspace(*s_action)) {
++			s_action++;
++		}
+ 		/* now copy the strings (mode is already copied in parse_evdef) */
+ 		t->action = strdup(s_action);
+ 	} else {
+
+--
+2.1.1
+

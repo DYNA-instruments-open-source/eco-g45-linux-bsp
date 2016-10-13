@@ -1,0 +1,75 @@
+Index: linux-2.6.33/sound/soc/codecs/ac97.c
+===================================================================
+--- linux-2.6.33.orig/sound/soc/codecs/ac97.c
++++ linux-2.6.33/sound/soc/codecs/ac97.c
+@@ -24,6 +24,7 @@
+ 
+ #define AC97_VERSION "0.6"
+ 
++extern struct snd_soc_dai imx_ssi_pcm_dai[2];
+ static int ac97_prepare(struct snd_pcm_substream *substream,
+ 			struct snd_soc_dai *dai)
+ {
+@@ -80,9 +81,11 @@ static int ac97_write(struct snd_soc_cod
+ static int ac97_soc_probe(struct platform_device *pdev)
+ {
+ 	struct snd_soc_device *socdev = platform_get_drvdata(pdev);
++	struct snd_soc_card *card = socdev->card;
+ 	struct snd_soc_codec *codec;
+ 	struct snd_ac97_bus *ac97_bus;
+ 	struct snd_ac97_template ac97_template;
++	int i;
+ 	int ret = 0;
+ 
+ 	printk(KERN_INFO "AC97 SoC Audio Codec %s\n", AC97_VERSION);
+@@ -118,11 +121,21 @@ static int ac97_soc_probe(struct platfor
+ 	if (ret < 0)
+ 		goto bus_err;
+ 
++	/* free the ac97 here so that we don't leak it in snd_ac97_mixer */
++	snd_soc_free_ac97_codec(codec);
++
+ 	memset(&ac97_template, 0, sizeof(struct snd_ac97_template));
+ 	ret = snd_ac97_mixer(ac97_bus, &ac97_template, &codec->ac97);
+ 	if (ret < 0)
+ 		goto bus_err;
+ 
++	for (i = 0; i < card->num_links; i++) {
++		if (card->dai_link[i].codec_dai->ac97_control) {
++			snd_ac97_dev_add_pdata(codec->ac97,
++				card->dai_link[i].cpu_dai->ac97_pdata);
++		}
++	}
++
+ 	return 0;
+ 
+ bus_err:
+Index: linux-2.6.33/sound/soc/imx/imx-ssi.c
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/imx-ssi.c
++++ linux-2.6.33/sound/soc/imx/imx-ssi.c
+@@ -808,6 +808,7 @@ static int imx_ssi_probe(struct platform
+ 	int ret = 0;
+ 	unsigned int val;
+ 	struct snd_soc_dai *dai = &imx_ssi_pcm_dai[pdev->id];
++	void *ac97_pdata;
+ 
+ 	if (dai->id >= ARRAY_SIZE(imx_ssi_pcm_dai))
+ 		return -EINVAL;
+@@ -853,6 +854,8 @@ static int imx_ssi_probe(struct platform
+ 		goto failed_ioremap;
+ 	}
+ 
++	/* preserve platform data */
++	ac97_pdata = dai->ac97_pdata;
+ 	if (ssi->flags & IMX_SSI_USE_AC97) {
+ 		if (ac97_ssi) {
+ 			ret = -EBUSY;
+@@ -863,6 +866,7 @@ static int imx_ssi_probe(struct platform
+ 		memcpy(dai, &imx_ac97_dai, sizeof(imx_ac97_dai));
+ 	} else
+ 		memcpy(dai, &imx_ssi_dai, sizeof(imx_ssi_dai));
++	dai->ac97_pdata = ac97_pdata;
+ 
+ 	writel(0x0, ssi->base + SSI_SIER);
+ 

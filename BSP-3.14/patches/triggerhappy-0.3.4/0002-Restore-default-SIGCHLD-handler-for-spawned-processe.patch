@@ -1,0 +1,39 @@
+From 3e8f7eb71ef848bcbb807c9049e9fcaa3acc1dff Mon Sep 17 00:00:00 2001
+From: Julien Muchembled <jm-dbfllLguqzPsq35pWSNszA (AT) public (DOT) gmane.org>
+Date: Sat, 21 May 2011 16:43:26 +0200
+Subject: [PATCH 2/4] Restore default SIGCHLD handler for spawned processes
+
+Examples of software expecting SIGCHLD not to be ignored at startup are:
+- /sbin/ifup & /sbin/ifdown (Debian)
+- 'subprocess' module of Python
+---
+ trigger.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/trigger.c b/trigger.c
+index 3fc8ae7..bcae1e1 100644
+--- a/trigger.c
++++ b/trigger.c
+@@ -6,6 +6,7 @@
+ 
+ #include <string.h>
+ #include <ctype.h>
++#include <signal.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <unistd.h>
+@@ -221,6 +222,10 @@ void run_triggers(int type, int code, int value, keystate_holder ksh, device *de
+ 					char ev[8];
+ 					sprintf( &(ev[0]), "%d", et->value );
+ 					setenv( "TH_VALUE", &(ev[0]), 1 );
++					/* default SIGCHLD is not automatically
++					restored and most applications would
++					fail if this signal is ignored */
++					signal(SIGCHLD, SIG_DFL);
+ 					system(et->action);
+ 					exit(0);
+ 				} else if (pid < 0) {
+ 					
+--
+2.1.1
+

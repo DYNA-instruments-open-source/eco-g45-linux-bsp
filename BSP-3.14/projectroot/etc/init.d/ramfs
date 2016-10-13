@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# /etc/init.d/ramfs
+#
+# $Id$
+#
+echo "Try to mount battery-backed SRAM ..."
+
+if [ ! -c /dev/mtd0 ]; then
+	echo "MTD device not present."
+    exit 1
+fi
+
+if [ ! -b /dev/mtdblock0 ]; then
+	echo "MTD block device not present."
+    exit 1
+fi
+
+if [ ! -d /mnt/sram ]; then
+	echo "Mount point for battery-backed ram does not exist, creating ..."
+    mkdir -p /mnt/sram
+fi
+
+FS=`/usr/bin/fstyp /dev/mtdblock0`
+
+if [ "${FS}" = "jffs2" ]; then
+	echo "Valid JFFS2 file system found on battery-backed SRAM."
+	mount /dev/mtdblock0 -t jffs2 /mnt/sram
+else
+	echo "There is no valid JFFS2 file system on battery-backed SRAM, creating ..."
+	flash_eraseall /dev/mtd0
+	mkfs.jffs2 /dev/mtdblock0 > /dev/null 2>&1
+	mount /dev/mtdblock0 -t jffs2 /mnt/sram	> /dev/null 2>&1
+fi

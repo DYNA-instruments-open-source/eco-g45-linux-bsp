@@ -1,0 +1,19 @@
+--- a/arch/arm/mach-at91/board-eco-g45.c
++++ b/arch/arm/mach-at91/board-eco-g45.c
+@@ -108,11 +108,11 @@ static struct mtd_partition __initdata e
+     .offset = MTDPART_OFS_NXTBLK,
+     .size = SZ_128K,
+   },
+-  {
+-    .name = "bootlogo",
+-    .offset = MTDPART_OFS_NXTBLK,
+-    .size = SZ_512K,
+-  },
++//  {
++//    .name = "bootlogo",
++//    .offset = MTDPART_OFS_NXTBLK,
++//    .size = SZ_512K,
++//  },
+   {
+     .name = "linux",
+     .offset = MTDPART_OFS_NXTBLK,

@@ -1,0 +1,347 @@
+From 649bf670a012558393d7c41f3660d0a017edd982 Mon Sep 17 00:00:00 2001
+From: Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+Date: Tue, 10 May 2011 22:37:35 +0200
+Subject: [PATCH 1/4] clarify licence information (GPLv3 or later)
+
+---
+ cmdsocket.c | 3 ++-
+ cmdsocket.h | 3 ++-
+ command.h | 3 ++-
+ devices.c | 3 ++-
+ devices.h | 3 ++-
+ devtag.h | 3 ++-
+ eventnames.c | 3 ++-
+ eventnames.h | 3 ++-
+ eventtable.h | 3 ++-
+ ignore.c | 3 ++-
+ ignore.h | 3 ++-
+ keystate.c | 3 ++-
+ keystate.h | 3 ++-
+ obey.c | 3 ++-
+ obey.h | 3 ++-
+ th-cmd.c | 3 ++-
+ thd.c | 3 ++-
+ thd.h | 3 ++-
+ trigger.c | 3 ++-
+ trigger.h | 3 ++-
+ triggerparser.c | 3 ++-
+ triggerparser.h | 3 ++-
+ uinput.c | 3 ++-
+ uinput.h | 3 ++-
+ 24 files changed, 48 insertions(+), 24 deletions(-)
+
+diff --git a/cmdsocket.c b/cmdsocket.c
+index 1fb3e07..2b2f4da 100644
+--- a/cmdsocket.c
++++ b/cmdsocket.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/cmdsocket.h b/cmdsocket.h
+index 8b095bc..f2d67a9 100644
+--- a/cmdsocket.h
++++ b/cmdsocket.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ int bind_cmdsocket(char *name);
+diff --git a/command.h b/command.h
+index bd696e1..808419b 100644
+--- a/command.h
++++ b/command.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include "devtag.h"
+diff --git a/devices.c b/devices.c
+index 276dceb..92c7704 100644
+--- a/devices.c
++++ b/devices.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/devices.h b/devices.h
+index be62830..5ec3dd0 100644
+--- a/devices.h
++++ b/devices.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include "devtag.h"
+diff --git a/devtag.h b/devtag.h
+index 8faa05e..e4f2d96 100644
+--- a/devtag.h
++++ b/devtag.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #define TH_DEVICE_TAG_LENGTH 256
+diff --git a/eventnames.c b/eventnames.c
+index 484be29..d06ca06 100644
+--- a/eventnames.c
++++ b/eventnames.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdlib.h>
+diff --git a/eventnames.h b/eventnames.h
+index feb8673..78950bc 100644
+--- a/eventnames.h
++++ b/eventnames.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <linux/input.h>
+diff --git a/eventtable.h b/eventtable.h
+index dab5435..9b74463 100644
+--- a/eventtable.h
++++ b/eventtable.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <linux/input.h>
+diff --git a/ignore.c b/ignore.c
+index 9c4f365..aa4c0c6 100644
+--- a/ignore.c
++++ b/ignore.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/ignore.h b/ignore.h
+index 776220f..f989446 100644
+--- a/ignore.h
++++ b/ignore.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ typedef struct ignore {
+diff --git a/keystate.c b/keystate.c
+index 687f3a5..b0acbbd 100644
+--- a/keystate.c
++++ b/keystate.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/keystate.h b/keystate.h
+index 04a7f4f..b8c1edf 100644
+--- a/keystate.h
++++ b/keystate.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <linux/input.h>
+diff --git a/obey.c b/obey.c
+index 7b1c7a0..75f91ce 100644
+--- a/obey.c
++++ b/obey.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/obey.h b/obey.h
+index 794274c..cf115ef 100644
+--- a/obey.h
++++ b/obey.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ int obey_command( struct command *cmd );
+diff --git a/th-cmd.c b/th-cmd.c
+index cbb1603..aec90f1 100644
+--- a/th-cmd.c
++++ b/th-cmd.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdlib.h>
+diff --git a/thd.c b/thd.c
+index 4b68241..b7f1327 100644
+--- a/thd.c
++++ b/thd.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/thd.h b/thd.h
+index 33bfdab..8832e2b 100644
+--- a/thd.h
++++ b/thd.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ void cleanup(void);
+diff --git a/trigger.c b/trigger.c
+index 676c61c..3fc8ae7 100644
+--- a/trigger.c
++++ b/trigger.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <string.h>
+diff --git a/trigger.h b/trigger.h
+index 714ea14..644476e 100644
+--- a/trigger.h
++++ b/trigger.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include "devtag.h"
+diff --git a/triggerparser.c b/triggerparser.c
+index 3bc2e91..3b1e825 100644
+--- a/triggerparser.c
++++ b/triggerparser.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <string.h>
+diff --git a/triggerparser.h b/triggerparser.h
+index f5e8d81..e807d4f 100644
+--- a/triggerparser.h
++++ b/triggerparser.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ trigger* parse_trigger(char* line);
+diff --git a/uinput.c b/uinput.c
+index 6127150..c9076a7 100644
+--- a/uinput.c
++++ b/uinput.c
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ #include <stdio.h>
+diff --git a/uinput.h b/uinput.h
+index 5a3ce72..15a40dc 100644
+--- a/uinput.h
++++ b/uinput.h
+@@ -1,6 +1,7 @@
+ /* Copyright 2010 Stefan Tomanek <stefan.tomanek+th@wertarbyte.de>
+  * You have permission to copy, modify, and redistribute under the
+- * terms of the GPL. For full license terms, see COPYING.
++ * terms of the GPLv3 or any later version.
++ * For full license terms, see COPYING.
+  */
+
+ int open_uinput(const char *path);
+--
+2.1.1
+

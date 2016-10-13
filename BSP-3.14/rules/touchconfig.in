@@ -1,0 +1,6 @@
+## SECTION=initmethod
+
+config TOUCHCONFIG_STARTSCRIPT
+	bool
+	default y
+	prompt "install /etc/init.d/touchconfig"

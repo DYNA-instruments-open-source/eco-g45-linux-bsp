@@ -1,0 +1,64 @@
+From b74fde47f32d3e9508857e6c5b9533bcbd7cca65 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Thu, 10 Dec 2009 10:19:43 +0100
+Subject: [PATCH 09/59] imx: rename Kconfig symbol for "Eukrea CPUIMX27 module"
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Not using MACH_CPUIMX27 makes machine_is_cpuimx27 always return 0
+independent of building support for this machine.
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Cc: Sascha Hauer <kernel@pengutronix.de>
+Cc: Russell King <linux@arm.linux.org.uk>
+Cc: Jean Delvare <khali@linux-fr.org>
+Cc: Eric Benard <eric@eukrea.com>
+---
+ arch/arm/mach-mx2/Kconfig  |    6 +++---
+ arch/arm/mach-mx2/Makefile |    2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx2/Kconfig
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Kconfig
++++ linux-2.6.33/arch/arm/mach-mx2/Kconfig
+@@ -55,7 +55,7 @@ config MACH_PCM970_BASEBOARD
+ 
+ endchoice
+ 
+-config MACH_EUKREA_CPUIMX27
++config MACH_CPUIMX27
+ 	bool "Eukrea CPUIMX27 module"
+ 	depends on MACH_MX27
+ 	help
+@@ -64,14 +64,14 @@ config MACH_EUKREA_CPUIMX27
+ 
+ config MACH_EUKREA_CPUIMX27_USESDHC2
+ 	bool "CPUIMX27 integrates SDHC2 module"
+-	depends on MACH_EUKREA_CPUIMX27
++	depends on MACH_CPUIMX27
+ 	help
+ 	  This adds support for the internal SDHC2 used on CPUIMX27 used
+ 	  for wifi or eMMC.
+ 
+ choice
+ 	prompt "Baseboard"
+-	depends on MACH_EUKREA_CPUIMX27
++	depends on MACH_CPUIMX27
+ 	default MACH_EUKREA_MBIMX27_BASEBOARD
+ 
+ config MACH_EUKREA_MBIMX27_BASEBOARD
+Index: linux-2.6.33/arch/arm/mach-mx2/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Makefile
++++ linux-2.6.33/arch/arm/mach-mx2/Makefile
+@@ -17,7 +17,7 @@ obj-$(CONFIG_MACH_PCM038) += pcm038.o
+ obj-$(CONFIG_MACH_PCM970_BASEBOARD) += pcm970-baseboard.o
+ obj-$(CONFIG_MACH_MX27_3DS) += mx27pdk.o
+ obj-$(CONFIG_MACH_MX27LITE) += mx27lite.o
+-obj-$(CONFIG_MACH_EUKREA_CPUIMX27) += eukrea_cpuimx27.o
++obj-$(CONFIG_MACH_CPUIMX27) += eukrea_cpuimx27.o
+ obj-$(CONFIG_MACH_EUKREA_MBIMX27_BASEBOARD) += eukrea_mbimx27-baseboard.o
+ obj-$(CONFIG_MACH_PCA100) += pca100.o
+ obj-$(CONFIG_MACH_MXT_TD60) += mxt_td60.o

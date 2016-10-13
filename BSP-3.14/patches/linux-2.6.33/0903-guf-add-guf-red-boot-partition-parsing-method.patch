@@ -1,0 +1,25 @@
+From ba84629b7a52c2199ab6e3d55a40195e87610f79 Mon Sep 17 00:00:00 2001
+From: Robert Schwebel <r.schwebel@pengutronix.de>
+Date: Mon, 22 Feb 2010 21:25:11 +0100
+Subject: [PATCH 49/59] guf neso: add guf red boot partition parsing method
+
+This code is not intended for mainline yet.
+
+Signed-off-by: Robert Schwebel <r.schwebel@pengutronix.de>
+---
+ drivers/mtd/nand/mxc_nand.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+Index: linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/nand/mxc_nand.c
++++ linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+@@ -164,7 +164,7 @@ static struct nand_ecclayout nandv2_hw_e
+ };
+ 
+ #ifdef CONFIG_MTD_PARTITIONS
+-static const char *part_probes[] = { "RedBoot", "cmdlinepart", NULL };
++static const char *part_probes[] = { "GufRedBoot", "RedBoot", "cmdlinepart", NULL };
+ #endif
+ 
+ static irqreturn_t mxc_nfc_irq(int irq, void *dev_id)

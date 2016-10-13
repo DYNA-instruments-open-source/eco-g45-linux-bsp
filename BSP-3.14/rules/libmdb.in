@@ -1,0 +1,8 @@
+## SECTION=system_libraries
+
+config LIBMDB
+	tristate
+	prompt "libmdb"
+	help
+	  Library for using the Multi-Drop Bus (MDB) over a MARK/SPACE
+	  parity supporting TTY serial interface.

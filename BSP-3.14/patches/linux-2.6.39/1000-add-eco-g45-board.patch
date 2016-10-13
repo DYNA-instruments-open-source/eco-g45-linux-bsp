@@ -1,0 +1,489 @@
+Index: linux-2.6.39/arch/arm/mach-at91/Kconfig
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/Kconfig
++++ linux-2.6.39/arch/arm/mach-at91/Kconfig
+@@ -422,6 +422,11 @@ config MACH_AT91SAM9M10G45EK
+ 	  "ES" at the end of the name means that this board is an
+ 	  Engineering Sample.
+ 
++config MACH_ECO_G45
++	bool "Garz & Fricke ECO-G45"
++	help
++	  Select this if you are using Garz & Fricke's ECO-G45.
++
+ endif
+ 
+ # ----------------------------------------------------------
+Index: linux-2.6.39/arch/arm/mach-at91/Makefile
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/Makefile
++++ linux-2.6.39/arch/arm/mach-at91/Makefile
+@@ -74,6 +74,7 @@ obj-$(CONFIG_MACH_SNAPPER_9260)	+= board
+ 
+ # AT91SAM9G45 board-specific support
+ obj-$(CONFIG_MACH_AT91SAM9M10G45EK) += board-sam9m10g45ek.o
++obj-$(CONFIG_MACH_ECO_G45) += board-eco-g45.o
+ 
+ # AT91CAP9 board-specific support
+ obj-$(CONFIG_MACH_AT91CAP9ADK)	+= board-cap9adk.o
+Index: linux-2.6.39/arch/arm/tools/mach-types
+===================================================================
+--- linux-2.6.39.orig/arch/arm/tools/mach-types
++++ linux-2.6.39/arch/arm/tools/mach-types
+@@ -1099,3 +1099,4 @@ ecuv5			MACH_ECUV5		ECUV5			3421
+ hsgx6d			MACH_HSGX6D		HSGX6D			3422
+ dawad7			MACH_DAWAD7		DAWAD7			3423
+ sam9repeater		MACH_SAM9REPEATER	SAM9REPEATER		3424
++ecog45			MACH_ECOG45		ECOG45			3595
+Index: linux-2.6.39/arch/arm/mach-at91/board-eco-g45.c
+===================================================================
+--- /dev/null
++++ linux-2.6.39/arch/arm/mach-at91/board-eco-g45.c
+@@ -0,0 +1,447 @@
++/*
++ *  Board-specific setup code for the ECO-G45
++ *
++ *  Copyright (C) 2011 Garz & Fricke GmbH.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ */
++
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/mm.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/spi/spi.h>
++#include <linux/fb.h>
++#include <linux/clk.h>
++#include <linux/atmel-mci.h>
++#include <linux/mtd/physmap.h>
++#include <linux/mtd/plat-ram.h>
++#include <linux/i2c/at24.h>
++
++#include <mach/hardware.h>
++#include <video/atmel_lcdc.h>
++
++#include <asm/setup.h>
++#include <asm/mach-types.h>
++#include <asm/irq.h>
++
++#include <asm/mach/arch.h>
++#include <asm/mach/map.h>
++#include <asm/mach/irq.h>
++
++#include <mach/board.h>
++#include <mach/gpio.h>
++#include <mach/at91sam9_smc.h>
++#include <mach/at91_shdwc.h>
++
++#include "sam9_smc.h"
++#include "generic.h"
++
++static void __init eco_g45_map_io(void)
++{
++	/* Initialize processor: 12.000 MHz crystal */
++	at91sam9g45_initialize(12000000);
++
++	/* DGBU on ttyS0. (Rx & Tx only) */
++	at91_register_uart(0, 0, 0, -1, -1);
++
++	/* USART0 not connected on the ECO-G45 board */
++	/* USART1 on ttyS2. (Rx, Tx, RTS, CTS) */
++	/* Enable UART1 with native RTS/CTS */
++	at91_register_uart(AT91SAM9G45_ID_US1, 2, ATMEL_UART_CTS | ATMEL_UART_RTS, -1, -1);
++	/* Enable UART1 with GPIO RTS/CTS */
++	//at91_register_uart(AT91SAM9G45_ID_US1, 2, 0, AT91_PIN_PD17, AT91_PIN_PD16);
++
++	/* set serial console to ttyS0 (ie, DBGU) */
++	at91_set_serial_console(0);
++}
++
++static void __init eco_g45_init_irq(void)
++{
++	at91sam9g45_init_interrupts(NULL);
++}
++
++/*
++ * MACB Ethernet device
++ */
++static struct at91_eth_data __initdata eco_g45_macb_data = {
++	.phy_irq_pin	= AT91_PIN_PD1,
++	.is_rmii	= 1,
++};
++
++/*
++ * USB HS Host port (common to OHCI & EHCI)
++ */
++static struct at91_usbh_data __initdata eco_g45_usbh_hs_data = {
++	.ports		= 2,
++	.vbus_pin	= {AT91_PIN_PB23, AT91_PIN_PB24}, // must be < 1 to disable VBUS feature
++};
++
++/*
++ * USB HS Device port
++ */
++static struct usba_platform_data __initdata eco_g45_usba_udc_data = {
++	.vbus_pin	= AT91_PIN_PB19,
++	.force_full_speed = 0,
++};
++
++/*
++ * SPI devices.
++ */
++ static struct gpio eco_g45_spi0_cs_pins[] = {
++	{ .gpio = AT91_PIN_PB3  },
++	{ .gpio = AT91_PIN_PD24 },
++	{ .gpio = AT91_PIN_PD25 },
++	{ .gpio = AT91_PIN_PD27 },
++};
++
++static struct atmel_spi_data eco_g45_spi0_data = {
++	.bus_num	= 0,
++	.num_cs_pin	= 4,
++	.cs_pins	= &eco_g45_spi0_cs_pins[0],
++	.flags		= ATMEL_SPI_CS_DEC
++};
++
++static struct spi_board_info eco_g45_spi_devices[] = {
++};
++
++/*
++ * I2C
++ */
++static void eco_g45_eeprom_setup(struct memory_accessor *macc, void *context) {
++}
++
++static struct at24_platform_data eco_g45_eeprom = {
++	.byte_len = 4096,
++	.page_size = 32,
++	.flags = AT24_FLAG_ADDR16,
++	.setup = eco_g45_eeprom_setup,
++};
++
++static struct i2c_board_info __initdata eco_g45_i2c_devices[] = {
++	{
++		/* SOC EEPROM */
++		I2C_BOARD_INFO("24c32", 0x57),
++		.platform_data = &eco_g45_eeprom,
++	},
++};
++
++/*
++ * MCI (SD/MMC)
++ */
++static struct mci_platform_data __initdata eco_g45_mci0_data = {
++	.slot[0] = {
++		.bus_width	= 4,
++		.detect_pin	= AT91_PIN_PD10,
++	},
++};
++
++static struct mci_platform_data __initdata eco_g45_mci1_data = {
++	.slot[0] = {
++		.bus_width	= 4,
++		.detect_pin	= AT91_PIN_PD0,
++	},
++};
++
++/*
++ * NAND flash
++ */
++static struct mtd_partition __initdata eco_g45_nand_partition[] = {
++	{
++		.name	= "bootstrap",
++		.offset	= 0,
++		.size	= SZ_128K,
++	},
++	{
++		.name	= "uboot",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_512K,
++	},
++	{
++		.name	= "env1",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_128K,
++	},
++	{
++		.name	= "env2",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_128K,
++	},
++	{
++		.name	= "bootlogo",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= SZ_512K,
++	},
++	{
++		.name	= "linux",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= 6 * SZ_1M,
++	},
++	{
++		.name	= "root",
++		.offset	= MTDPART_OFS_NXTBLK,
++		.size	= MTDPART_SIZ_FULL,
++	},
++};
++
++static struct mtd_partition * __init nand_partitions(int size, int *num_partitions)
++{
++	*num_partitions = ARRAY_SIZE(eco_g45_nand_partition);
++	return eco_g45_nand_partition;
++}
++
++/* det_pin is not connected */
++static struct atmel_nand_data __initdata eco_g45_nand_data = {
++	.ale		= 21,
++	.cle		= 22,
++	.rdy_pin	= AT91_PIN_PC8,
++	.enable_pin	= AT91_PIN_PC14,
++	.partition_info	= nand_partitions,
++	//.det_pin	= -1,
++	.det_pin	= 0,
++	.bus_width_16	= 0,
++	.use_dma = 0,
++};
++
++static struct sam9_smc_config __initdata eco_g45_nand_smc_config = {
++	.ncs_read_setup		= 0,
++	.nrd_setup		= 1,
++	.ncs_write_setup	= 0,
++	.nwe_setup		= 1,
++
++	.ncs_read_pulse		= 2,
++	.nrd_pulse		= 3,
++	.ncs_write_pulse	= 3,
++	.nwe_pulse		= 4,
++
++	.read_cycle		= 4,
++	.write_cycle		= 7,
++
++	.mode			= AT91_SMC_READMODE | AT91_SMC_WRITEMODE | AT91_SMC_EXNWMODE_DISABLE | AT91_SMC_DBW_8 | AT91_SMC_TDFMODE,
++	.tdf_cycles		= 3,
++};
++
++static void __init eco_g45_add_device_nand(void)
++{
++	/* configure chip-select 3 (NAND) */
++	sam9_smc_configure(3, &eco_g45_nand_smc_config);
++
++	at91_add_device_nand(&eco_g45_nand_data);
++}
++
++/*
++ * NAND flash
++ */
++struct platdata_mtd_ram eco_g45_sram_pdata = {
++	.mapname	= "SRAM",
++	.bankwidth	= 1,
++};
++
++static struct resource eco_g45_sram_resource[] = {
++	[0] = {
++		.start = AT91_CHIPSELECT_0,
++		.end   = AT91_CHIPSELECT_0 + 512 * 1024 - 1,
++		.flags = IORESOURCE_MEM,
++	},
++};
++
++/*
++ * Battery-backed SRAM
++ */
++static struct platform_device eco_g45_sram = {
++	.name		= "mtd-ram",
++	.id		= 0,
++	.resource	= eco_g45_sram_resource,
++	.num_resources	= ARRAY_SIZE(eco_g45_sram_resource),
++	.dev	= {
++		.platform_data = &eco_g45_sram_pdata,
++	},
++};
++
++/*
++ * LCD Controller
++ */
++#if defined(CONFIG_FB_ATMEL) || defined(CONFIG_FB_ATMEL_MODULE)
++static struct fb_videomode eco_g45_tft_vga_modes[] = {
++	{
++		.name           = "GP",
++		.refresh	= 60,
++		.xres		= 480,		.yres		= 272,
++		.pixclock	= KHZ2PICOS(30000),
++
++		.left_margin	= 1,		.right_margin	= 1,
++		.upper_margin	= 40,		.lower_margin	= 1,
++		.hsync_len	= 45,		.vsync_len	= 1,
++
++		.sync		= 0,
++		.vmode		= FB_VMODE_NONINTERLACED,
++	},
++};
++
++static struct fb_monspecs eco_g45_fb_default_monspecs = {
++	.manufacturer	= "GP",
++	.monitor        = "GPM1035A0",
++
++	.modedb		= eco_g45_tft_vga_modes,
++	.modedb_len	= ARRAY_SIZE(eco_g45_tft_vga_modes),
++	.hfmin		= 15000,
++	.hfmax		= 17640,
++	.vfmin		= 57,
++	.vfmax		= 67,
++};
++
++#define AT91SAM9G45_DEFAULT_LCDCON2 	(ATMEL_LCDC_MEMOR_LITTLE \
++					| ATMEL_LCDC_DISTYPE_TFT \
++					| ATMEL_LCDC_CLKMOD_ALWAYSACTIVE \
++					| ATMEL_LCDC_INVCLK_INVERTED)
++
++/* Driver datas */
++/* If the bootloader has already initialized the controller,
++   this settings are ignored. */
++static struct atmel_lcdfb_info __initdata eco_g45_lcdc_data = {
++	.lcdcon_is_backlight	= false,
++	.default_bpp			= 16,
++	.default_dmacon			= ATMEL_LCDC_DMAEN,
++	.default_lcdcon2		= AT91SAM9G45_DEFAULT_LCDCON2,
++	.default_monspecs		= &eco_g45_fb_default_monspecs,
++	.guard_time				= 9,
++	.lcd_wiring_mode		= ATMEL_LCDC_WIRING_RGB,
++	.signal_on_to_backlight_on = 150,
++	.backlight_off_to_signal_off = 50,
++};
++
++#else
++static struct atmel_lcdfb_info __initdata eco_g45_lcdc_data;
++#endif
++
++/*
++ * Touchscreen
++ */
++static struct at91_tsadcc_data eco_g45_tsadcc_data = {
++	.adc_clock		= 300000,
++	.pendet_debounce	= 0x0d,
++	.ts_sample_hold_time	= 0x0a,
++};
++
++/*
++ * PWM Backlight
++ */
++static struct atmel_pwm_platform_data eco_g45_pwm_data = {
++	.pwm_mask			= (1 << AT91_PWM2),
++};
++
++/* The eye senses logaritmic, so we use a logaritmic LUT. */
++static unsigned short gpm1035_bl_lut[256] = {
++	0x0000, 0x0002, 0x0004, 0x0006, 0x0008, 0x000a, 0x000c, 0x000e,
++	0x0010, 0x0012, 0x0014, 0x0016, 0x0018, 0x001a, 0x001c, 0x001e,
++	0x0040, 0x0044, 0x0048, 0x004c, 0x0050, 0x0054, 0x0058, 0x005c,
++	0x0060, 0x0064, 0x0068, 0x006c, 0x0070, 0x0074, 0x0078, 0x007c,
++	0x0100, 0x0108, 0x0110, 0x0118, 0x0120, 0x0128, 0x0130, 0x0138,
++	0x0140, 0x0148, 0x0150, 0x0158, 0x0160, 0x0168, 0x0170, 0x0178,
++	0x0300, 0x0310, 0x0320, 0x0330, 0x0340, 0x0350, 0x0360, 0x0370,
++	0x0380, 0x0390, 0x03a0, 0x03b0, 0x03c0, 0x03d0, 0x03e0, 0x03f0,
++	0x0800, 0x0820, 0x0840, 0x0860, 0x0880, 0x08a0, 0x08c0, 0x08e0,
++	0x0900, 0x0920, 0x0940, 0x0960, 0x0980, 0x09a0, 0x09c0, 0x09e0,
++	0x1400, 0x1440, 0x1480, 0x14c0, 0x1500, 0x1540, 0x1580, 0x15c0,
++	0x1600, 0x1640, 0x1680, 0x16c0, 0x1700, 0x1740, 0x1780, 0x17c0,
++	0x3000, 0x3080, 0x3100, 0x3180, 0x3200, 0x3280, 0x3300, 0x3380,
++	0x3400, 0x3480, 0x3500, 0x3580, 0x3600, 0x3680, 0x3700, 0x3780,
++	0x7000, 0x7100, 0x7200, 0x7300, 0x7400, 0x7500, 0x7600, 0x7700,
++	0x7800, 0x7900, 0x7a00, 0x7b00, 0x7c00, 0x7d00, 0x7e00, 0x7f00,
++	0x8000, 0x8100, 0x8200, 0x8300, 0x8400, 0x8500, 0x8600, 0x8700,
++	0x8800, 0x8900, 0x8a00, 0x8b00, 0x8c00, 0x8d00, 0x8e00, 0x8f00,
++	0x9000, 0x9100, 0x9200, 0x9300, 0x9400, 0x9500, 0x9600, 0x9700,
++	0x9800, 0x9900, 0x9a00, 0x9b00, 0x9c00, 0x9d00, 0x9e00, 0x9f00,
++	0xa000, 0xa100, 0xa200, 0xa300, 0xa400, 0xa500, 0xa600, 0xa700,
++	0xa800, 0xa900, 0xaa00, 0xab00, 0xac00, 0xad00, 0xae00, 0xaf00,
++	0xb000, 0xb100, 0xb200, 0xb300, 0xb400, 0xb500, 0xb600, 0xb700,
++	0xb800, 0xb900, 0xba00, 0xbb00, 0xbc00, 0xbd00, 0xbe00, 0xbf00,
++	0xc000, 0xc100, 0xc200, 0xc300, 0xc400, 0xc500, 0xc600, 0xc700,
++	0xc800, 0xc900, 0xca00, 0xcb00, 0xcc00, 0xcd00, 0xce00, 0xcf00,
++	0xd000, 0xd100, 0xd200, 0xd300, 0xd400, 0xd500, 0xd600, 0xd700,
++	0xd800, 0xd900, 0xda00, 0xdb00, 0xdc00, 0xdd00, 0xde00, 0xdf00,
++	0xe000, 0xe100, 0xe200, 0xe300, 0xe400, 0xe500, 0xe600, 0xe700,
++	0xe800, 0xe900, 0xea00, 0xeb00, 0xec00, 0xed00, 0xee00, 0xef00,
++	0xf000, 0xf100, 0xf200, 0xf300, 0xf400, 0xf500, 0xf600, 0xf700,
++	0xf800, 0xf900, 0xfa00, 0xfb00, 0xfc00, 0xfd00, 0xfe00, 0xffff,
++};
++
++static struct atmel_pwm_bl_platform_data eco_g45_pwm_bl_data = {
++	.pwm_channel		= 2,
++	.pwm_frequency		= 8191, /* TPS61161A requires 5-100kHz */
++	.pwm_compare_max	= 8191, /* We cannot use the full range, because
++								   MCK=100MHz is to slow to count above 5kHz. */
++	.pwm_duty_max		= 255,
++	.pwm_duty_min		= 0,
++	.pwm_duty_init		= 255,
++	.pwm_bl_lut			= gpm1035_bl_lut,
++	.pwm_active_low		= 0,
++	.gpio_on			= AT91_PIN_PE2,
++	.on_active_low		= 0,
++};
++
++/*
++ * AC97
++ * reset_pin is not connected: NRST
++ */
++static struct ac97c_platform_data eco_g45_ac97_data = {
++	.reset_pin = AT91_PIN_PC17,
++};
++
++/*
++ * Platform devices
++ */
++static struct platform_device *eco_g45_platform_devices[] __initdata = {
++	&eco_g45_sram,
++};
++
++static void __init eco_g45_board_init(void)
++{
++	/* Serial */
++	at91_add_device_serial();
++	/* USB HS Host */
++	at91_add_device_usbh_ohci(&eco_g45_usbh_hs_data);
++	at91_add_device_usbh_ehci(&eco_g45_usbh_hs_data);
++	/* USB HS Device */
++	at91_add_device_usba(&eco_g45_usba_udc_data);
++	/* SPI */
++	at91_add_device_spi(&eco_g45_spi0_data);
++	spi_register_board_info(eco_g45_spi_devices,
++		ARRAY_SIZE(eco_g45_spi_devices));
++	/* MMC/SD */
++	at91_add_device_mci(0, &eco_g45_mci0_data);
++	at91_add_device_mci(1, &eco_g45_mci1_data);
++	/* Ethernet */
++	at91_add_device_eth(&eco_g45_macb_data);
++	/* NAND */
++	eco_g45_add_device_nand();
++	/* I2C */
++	at91_add_device_i2c(0, eco_g45_i2c_devices,
++		ARRAY_SIZE(eco_g45_i2c_devices));
++	/* LCD Controller */
++	at91_add_device_lcdc(&eco_g45_lcdc_data);
++	/* PWM with Backlight in post initialization */
++	at91_add_device_pwm(&eco_g45_pwm_data);
++	at91_add_device_pwm_bl(&eco_g45_pwm_bl_data);
++	/* Touch Screen */
++	at91_add_device_tsadcc(&eco_g45_tsadcc_data);
++	/* AC97 */
++	at91_add_device_ac97(&eco_g45_ac97_data);
++	/* Platform devices */
++	platform_add_devices(eco_g45_platform_devices,
++		ARRAY_SIZE(eco_g45_platform_devices));
++}
++
++MACHINE_START(ECOG45, "Garz & Fricke ECO-G45")
++	/* Maintainer: Garz & Fricke */
++	.boot_params	= AT91_SDRAM_BASE + 0x100,
++	.timer		= &at91sam926x_timer,
++	.map_io		= eco_g45_map_io,
++	.init_irq	= eco_g45_init_irq,
++	.init_machine	= eco_g45_board_init,
++MACHINE_END

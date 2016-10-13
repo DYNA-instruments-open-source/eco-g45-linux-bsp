@@ -1,0 +1,17 @@
+#!/bin/sh
+
+. /etc/profile
+
+case "$1" in
+start)
+	start-stop-daemon -m -p /var/run/qt4-guf-demo.pid -b -a /usr/bin/qt4-guf-demo -S -- -qws
+	;;
+stop)
+	start-stop-daemon -p /var/run/qt4-guf-demo.pid -K
+	;;
+*)
+	echo "Usage: /etc/init.d/qt4-guf-demo {start|stop}" >&2
+	exit 1
+	;;
+esac
+

@@ -1,0 +1,53 @@
+Subject: disable ordered compiling.
+From: Michael Olbrich <m.olbrich@pengutronix.de>
+
+By default all modules are compiled in a predefined order. This breaks when
+building not all modules. This patch disables ordered building. As a result
+qmake generates the correct dependancies.
+
+Signed-off-by: Michael Olbrich <m.olbrich@pengutronix.de>
+---
+ projects.pro |    1 -
+ src/src.pro  |    6 ++++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+Index: qt-everywhere-opensource-src-4.7.2/projects.pro
+===================================================================
+--- qt-everywhere-opensource-src-4.7.2.orig/projects.pro
++++ qt-everywhere-opensource-src-4.7.2/projects.pro
+@@ -2,7 +2,6 @@
+ # Main projectfile
+ #####################################################################
+ 
+-CONFIG += ordered
+ TEMPLATE = subdirs
+ 
+ cross_compile: CONFIG += nostrip
+Index: qt-everywhere-opensource-src-4.7.2/src/src.pro
+===================================================================
+--- qt-everywhere-opensource-src-4.7.2.orig/src/src.pro
++++ qt-everywhere-opensource-src-4.7.2/src/src.pro
+@@ -105,12 +105,13 @@ src_webkit_declarative.target = sub-webk
+    src_qt3support.depends = src_gui src_xml src_network src_sql
+    src_tools_idc.depends = src_corelib             # target defined in tools.pro
+    src_tools_uic3.depends = src_qt3support src_xml # target defined in tools.pro
+-   src_phonon.depends = src_gui
++   src_phonon.depends = src_gui src_network
+    src_multimedia.depends = src_gui
+    contains(QT_CONFIG, opengl):src_multimedia.depends += src_opengl
+    src_tools_activeqt.depends = src_tools_idc src_gui
+    src_declarative.depends = src_gui src_script src_network
+-   src_plugins.depends = src_gui src_sql src_svg
++   src_plugins.depends = src_gui src_sql
++   contains(QT_CONFIG, svg):src_plugins.depends += src_svg
+    contains(QT_CONFIG, multimedia):src_plugins.depends += src_multimedia
+    src_s60installs.depends = $$TOOLS_SUBDIRS $$SRC_SUBDIRS
+    src_s60installs.depends -= src_s60installs
+@@ -142,6 +143,7 @@ src_webkit_declarative.target = sub-webk
+       src_declarative.depends += src_svg
+    }
+    contains(QT_CONFIG, webkit) : contains(QT_CONFIG, declarative): src_webkit_declarative.depends = src_declarative src_webkit
++   contains(QT_CONFIG, phonon):src_plugins.depends += src_phonon
+ }
+ 
+ 

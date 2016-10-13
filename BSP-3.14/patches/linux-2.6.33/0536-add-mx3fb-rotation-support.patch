@@ -1,0 +1,772 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mx3fb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+@@ -12,6 +12,7 @@
+ 
+ #include <linux/device.h>
+ #include <linux/fb.h>
++#include <mach/ipu.h>
+ 
+ /* Proprietary FB_SYNC_ flags */
+ #define FB_SYNC_OE_ACT_HIGH	0x80000000
+@@ -36,6 +37,7 @@ struct mx3fb_platform_data {
+ 	unsigned long			bpp;
+ 	u_char * 			fixed_screen_cpu;
+ 	dma_addr_t 			fixed_screen_dma;
++	enum ipu_rotate_mode		rotation;
+ };
+ 
+ #endif
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/ipu.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/ipu.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/ipu.h
+@@ -138,6 +138,7 @@ struct idmac_video_param {
+ 	enum display_port	disp;
+ 	unsigned short		out_left;
+ 	unsigned short		out_top;
++	enum ipu_rotate_mode	rotation;
+ };
+ 
+ /*
+Index: linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+===================================================================
+--- linux-2.6.33.orig/drivers/dma/ipu/ipu_idmac.c
++++ linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+@@ -122,6 +122,10 @@ static void ipu_ic_enable_task(struct ip
+ 	case IDMAC_IC_7:
+ 		mask = IC_CONF_RWS_EN | IC_CONF_PRPENC_EN;
+ 		break;
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		mask = IC_CONF_PP_ROT_EN;
++		break;
+ 	default:
+ 		return;
+ 	}
+@@ -158,6 +162,11 @@ static uint32_t ipu_channel_status(struc
+ 		stat = (task_stat_reg & TSTAT_CSI2MEM_MASK) >>
+ 			TSTAT_CSI2MEM_OFFSET;
+ 		break;
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		stat = (task_stat_reg & TSTAT_PP_ROT_MASK) >>
++			TSTAT_PP_ROT_OFFSET;
++		break;
+ 	case IDMAC_IC_0:
+ 	case IDMAC_SDC_0:
+ 	case IDMAC_SDC_1:
+@@ -597,6 +606,10 @@ static uint32_t ipu_channel_conf_mask(en
+ 	uint32_t mask;
+ 
+ 	switch (channel) {
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		mask = IPU_CONF_ROT_EN | IPU_CONF_IC_EN;
++		break;
+ 	case IDMAC_IC_0:
+ 	case IDMAC_IC_7:
+ 		mask = IPU_CONF_CSI_EN | IPU_CONF_IC_EN;
+@@ -637,6 +650,8 @@ static int ipu_enable_channel(struct idm
+ 	case IDMAC_SDC_0:
+ 	case IDMAC_SDC_1:
+ 	case IDMAC_IC_7:
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
+ 		ipu_channel_set_priority(ipu, channel, true);
+ 	default:
+ 		break;
+@@ -709,6 +724,10 @@ static int ipu_init_channel_buffer(struc
+ 		ipu_ch_param_set_burst_size(&params, 8);
+  */
+ 		break;
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		ipu_ch_param_set_burst_size(&params, 8); // copied from ipu_common.c
++		break;
+ 	case IDMAC_SDC_0:
+ 	case IDMAC_SDC_1:
+ 		/* In original code only IPU_PIX_FMT_RGB565 was setting burst */
+@@ -891,7 +910,7 @@ static dma_cookie_t idmac_tx_submit(stru
+ 						 video->out_width,
+ 						 video->out_height,
+ 						 video->out_stride,
+-						 IPU_ROTATE_NONE,
++						 video->rotation,
+ 						 sg_dma_address(&desc->sg[0]),
+ 						 dma_1);
+ 		if (cookie < 0)
+@@ -1001,7 +1020,8 @@ static int ipu_init_channel(struct idmac
+ 	dev_dbg(ipu->dev, "init channel = %d\n", channel);
+ 
+ 	if (channel != IDMAC_SDC_0 && channel != IDMAC_SDC_1 &&
+-	    channel != IDMAC_IC_7)
++	    channel != IDMAC_IC_0 && channel != IDMAC_IC_7 &&
++		channel != IDMAC_IC_12 && channel != IDMAC_IC_13)
+ 		return -EINVAL;
+ 
+ 	spin_lock_irqsave(&ipu->lock, flags);
+@@ -1018,6 +1038,16 @@ static int ipu_init_channel(struct idmac
+ 		idmac_write_ipureg(ipu, reg & ~FS_ENC_IN_VALID, IPU_FS_PROC_FLOW);
+ 		ret = ipu_ic_init_prpenc(ipu, params, true);
+ 		break;
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		n_desc = 16;
++		reg = idmac_read_ipureg(ipu, IPU_FS_DISP_FLOW);
++		reg |= (2 << 0); // SDC SRC = ROT
++		idmac_write_ipureg(ipu, reg, IPU_FS_DISP_FLOW);
++		reg = idmac_read_ipureg(ipu, IPU_FS_PROC_FLOW);
++		reg |= (4 << 28) | (0 << 10); // ROT DEST = SDC BG, ROT SRC = CORE
++		idmac_write_ipureg(ipu, reg, IPU_FS_PROC_FLOW);
++		break;
+ 	case IDMAC_SDC_0:
+ 	case IDMAC_SDC_1:
+ 		n_desc = 4;
+@@ -1082,6 +1112,13 @@ static void ipu_uninit_channel(struct id
+ 		idmac_write_icreg(ipu, reg & ~(IC_CONF_PRPENC_EN | IC_CONF_PRPENC_CSC1),
+ 				  IC_CONF);
+ 		break;
++	case IDMAC_IC_12:
++	case IDMAC_IC_13:
++		reg = idmac_read_ipureg(ipu, IPU_CONF);
++		idmac_write_ipureg(ipu, reg & ~IPU_CONF_ROT_EN, IPU_CONF);
++		reg = idmac_read_icreg(ipu, IC_CONF);
++		idmac_write_icreg(ipu, reg & ~IC_CONF_PP_ROT_EN, IC_CONF);
++		break;
+ 	case IDMAC_SDC_0:
+ 	case IDMAC_SDC_1:
+ 	default:
+@@ -1234,6 +1271,10 @@ static irqreturn_t idmac_interrupt(int i
+ 
+ 	dev_dbg(dev, "IDMAC irq %d, buf %d\n", irq, ichan->active_buffer);
+ 
++	/* We don't handle interrupts for channel 12 */
++	if (chan_id == IDMAC_IC_12)
++		return IRQ_NONE;
++
+ 	spin_lock_irqsave(&ipu_data.lock, flags);
+ 
+ 	ready0	= idmac_read_ipureg(&ipu_data, IPU_CHA_BUF0_RDY);
+@@ -1286,6 +1327,13 @@ static irqreturn_t idmac_interrupt(int i
+ 				ichan->active_buffer, ready0, ready1, curbuf, i);
+ 	}
+ 
++	if (chan_id == IDMAC_IC_13)
++	{
++		idmac_write_ipureg(&ipu_data, 1UL << IDMAC_IC_13, IPU_CHA_BUF0_RDY);
++		spin_unlock(&ichan->lock);
++		return IRQ_HANDLED;
++	}
++
+ 	if (unlikely((ichan->active_buffer && (ready1 >> chan_id) & 1) ||
+ 		     (!ichan->active_buffer && (ready0 >> chan_id) & 1)
+ 		     )) {
+@@ -1300,7 +1348,7 @@ static irqreturn_t idmac_interrupt(int i
+ 	if (unlikely(list_empty(&ichan->queue))) {
+ 		ichan->sg[ichan->active_buffer] = NULL;
+ 		spin_unlock(&ichan->lock);
+-		dev_err(dev,
++		dev_dbg(dev,
+ 			"IRQ without queued buffers on channel %x, active %d, "
+ 			"ready %x, %x!\n", chan_id,
+ 			ichan->active_buffer, ready0, ready1);
+@@ -1433,7 +1481,8 @@ static struct dma_async_tx_descriptor *i
+ 
+ 	/* We only can handle these three channels so far */
+ 	if (chan->chan_id != IDMAC_SDC_0 && chan->chan_id != IDMAC_SDC_1 &&
+-	    chan->chan_id != IDMAC_IC_7)
++	    chan->chan_id != IDMAC_IC_7 && chan->chan_id != IDMAC_IC_12 &&
++		chan->chan_id != IDMAC_IC_13)
+ 		return NULL;
+ 
+ 	if (direction != DMA_FROM_DEVICE && direction != DMA_TO_DEVICE) {
+Index: linux-2.6.33/drivers/video/mx3fb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/mx3fb.c
++++ linux-2.6.33/drivers/video/mx3fb.c
+@@ -257,7 +257,9 @@ struct dma_chan_request {
+ /* MX3 specific framebuffer information. */
+ struct mx3fb_info {
+ 	int				blank;
+-	enum ipu_channel		ipu_ch;
++	enum ipu_channel		display_ch;
++	enum ipu_channel		rot_in_ch;
++	enum ipu_channel		rot_out_ch;
+ 	uint32_t			cur_ipu_buf;
+ 
+ 	u32				pseudo_palette[16];
+@@ -265,10 +267,18 @@ struct mx3fb_info {
+ 	struct completion		flip_cmpl;
+ 	struct mutex			mutex;	/* Protects fb-ops */
+ 	struct mx3fb_data		*mx3fb;
+-	struct idmac_channel		*idmac_channel;
+-	struct dma_async_tx_descriptor	*txd;
++	struct idmac_channel		*display_idmac_channel;
++	struct idmac_channel		*rot_in_idmac_channel;
++	struct idmac_channel		*rot_out_idmac_channel;
++	struct dma_async_tx_descriptor	*display_txd;
++	struct dma_async_tx_descriptor	*rot_in_txd;
++	struct dma_async_tx_descriptor	*rot_out_txd;
+ 	dma_cookie_t			cookie;
+-	struct scatterlist		sg[2];
++	struct scatterlist		display_sg[2];
++	struct scatterlist		rotation_sg[2];
++
++	unsigned long			rot_buf_physical_addr;
++	char __iomem			*rot_buf;
+ 
+ 	u32				sync;	/* preserve var->sync flags */
+ };
+@@ -279,6 +289,76 @@ static void mx3fb_dma_done(void *);
+ static const char *fb_mode;
+ static unsigned long default_bpp = 16;
+ 
++static void rotate_frame_buffer_content(struct mx3fb_info *mx3_fbi)
++{
++	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
++	struct device *dev = mx3fb->dev;
++	struct mx3fb_platform_data *mx3fb_pdata = dev->platform_data;
++	struct fb_info *fbi = mx3fb->fbi;
++	struct fb_var_screeninfo *var = &fbi->var;
++	u32 bpp = var->bits_per_pixel;
++	u32 pixel_count = var->xres * var->yres;
++	u32 pixel_size = bpp/8;
++	u32 mem_len = pixel_count * pixel_size;
++	char *fb_base, *rb_base, *fb_ptr, *rb_ptr;
++	int i;
++
++	rb_base = mx3_fbi->rot_buf;
++	fb_base = ioremap(fixed_screen_dma, mem_len);
++
++	fb_ptr = fb_base;
++
++	if (mx3fb_pdata->rotation == IPU_ROTATE_180)
++	{
++		rb_ptr = rb_base + mem_len - pixel_size;
++		while (fb_ptr < fb_base+mem_len)
++		{
++			*(fb_ptr++) = *rb_ptr;
++			*(fb_ptr++) = *(rb_ptr+1);
++			if (bpp > 16)
++			{
++				*(fb_ptr++) = *(rb_ptr+2);
++				*(fb_ptr++) = *(rb_ptr+3);
++			}
++			rb_ptr -= pixel_size;
++		}
++	}
++	else if (mx3fb_pdata->rotation == IPU_ROTATE_90_RIGHT)
++	{
++		rb_ptr = rb_base + (var->yres-1)*pixel_size;
++		while (fb_ptr < fb_base+mem_len)
++		{
++			*(fb_ptr++) = *rb_ptr;
++			*(fb_ptr++) = *(rb_ptr+1);
++			if (bpp > 16)
++			{
++				*(fb_ptr++) = *(rb_ptr+2);
++				*(fb_ptr++) = *(rb_ptr+3);
++			}
++			rb_ptr += var->yres*pixel_size;
++			if (rb_ptr >= rb_base+mem_len)
++				rb_ptr -= (mem_len+pixel_size);
++		}
++	}
++	else if (mx3fb_pdata->rotation == IPU_ROTATE_90_LEFT)
++	{
++		rb_ptr = rb_base + mem_len - var->yres*pixel_size;
++		while (fb_ptr < fb_base+mem_len)
++		{
++			*(fb_ptr++) = *rb_ptr;
++			*(fb_ptr++) = *(rb_ptr+1);
++			if (bpp > 16)
++			{
++				*(fb_ptr++) = *(rb_ptr+2);
++				*(fb_ptr++) = *(rb_ptr+3);
++			}
++			rb_ptr -= var->yres*pixel_size;
++			if (rb_ptr < rb_base)
++				rb_ptr += (mem_len+pixel_size);
++		}
++	}
++}
++
+ static u32 mx3fb_read_reg(struct mx3fb_data *mx3fb, unsigned long reg)
+ {
+ 	return __raw_readl(mx3fb->reg_base + reg);
+@@ -322,35 +402,78 @@ static uint32_t sdc_fb_uninit(struct mx3
+ static void sdc_enable_channel(struct mx3fb_info *mx3_fbi)
+ {
+ 	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
+-	struct idmac_channel *ichan = mx3_fbi->idmac_channel;
++	struct idmac_channel *ichan = mx3_fbi->display_idmac_channel;
+ 	struct dma_chan *dma_chan = &ichan->dma_chan;
+ 	unsigned long flags;
+ 	dma_cookie_t cookie;
+ 
+-	if (mx3_fbi->txd)
++	if (mx3_fbi->display_txd)
+ 		dev_dbg(mx3fb->dev, "mx3fbi %p, desc %p, sg %p\n", mx3_fbi,
+-			to_tx_desc(mx3_fbi->txd), to_tx_desc(mx3_fbi->txd)->sg);
++			to_tx_desc(mx3_fbi->display_txd), to_tx_desc(mx3_fbi->display_txd)->sg);
+ 	else
+ 		dev_dbg(mx3fb->dev, "mx3fbi %p, txd = NULL\n", mx3_fbi);
+ 
++	spin_lock_irqsave(&mx3fb->lock, flags);
++	sdc_fb_init(mx3_fbi);
++	spin_unlock_irqrestore(&mx3fb->lock, flags);
++
+ 	/* This enables the channel */
+ 	if (mx3_fbi->cookie < 0) {
+-		mx3_fbi->txd = dma_chan->device->device_prep_slave_sg(dma_chan,
+-		      &mx3_fbi->sg[0], 1, DMA_TO_DEVICE, DMA_PREP_INTERRUPT);
+-		if (!mx3_fbi->txd) {
++		// display channel
++		mx3_fbi->display_txd = dma_chan->device->device_prep_slave_sg(dma_chan,
++		      &mx3_fbi->display_sg[0], 1, DMA_TO_DEVICE, DMA_PREP_INTERRUPT);
++		if (!mx3_fbi->display_txd) {
++			dev_err(mx3fb->dev, "Cannot allocate descriptor on %d\n",
++				dma_chan->chan_id);
++			return;
++		}
++
++		mx3_fbi->display_txd->callback_param	= mx3_fbi->display_txd;
++		mx3_fbi->display_txd->callback		= mx3fb_dma_done;
++
++		cookie = mx3_fbi->display_txd->tx_submit(mx3_fbi->display_txd);
++		dev_dbg(mx3fb->dev, "%d: Submit %p #%d [%c]\n", __LINE__,
++		       mx3_fbi->display_txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
++
++		rotate_frame_buffer_content(mx3_fbi);
++
++		// rotation input channel
++		ichan = mx3_fbi->rot_in_idmac_channel;
++		dma_chan = &ichan->dma_chan;
++		mx3_fbi->rot_in_txd = dma_chan->device->device_prep_slave_sg(dma_chan,
++		      &mx3_fbi->rotation_sg[0], 1, DMA_TO_DEVICE, DMA_PREP_INTERRUPT);
++		if (!mx3_fbi->rot_in_txd) {
+ 			dev_err(mx3fb->dev, "Cannot allocate descriptor on %d\n",
+ 				dma_chan->chan_id);
+ 			return;
+ 		}
+ 
+-		mx3_fbi->txd->callback_param	= mx3_fbi->txd;
+-		mx3_fbi->txd->callback		= mx3fb_dma_done;
++		mx3_fbi->rot_in_txd->callback_param	= mx3_fbi->rot_in_txd;
++		mx3_fbi->rot_in_txd->callback		= mx3fb_dma_done;
+ 
+-		cookie = mx3_fbi->txd->tx_submit(mx3_fbi->txd);
++		cookie = mx3_fbi->rot_in_txd->tx_submit(mx3_fbi->rot_in_txd);
+ 		dev_dbg(mx3fb->dev, "%d: Submit %p #%d [%c]\n", __LINE__,
+-		       mx3_fbi->txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
++		       mx3_fbi->rot_in_txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
++
++		// rotation output channel
++		ichan = mx3_fbi->rot_out_idmac_channel;
++		dma_chan = &ichan->dma_chan;
++		mx3_fbi->rot_out_txd = dma_chan->device->device_prep_slave_sg(dma_chan,
++		      &mx3_fbi->display_sg[0], 1, DMA_FROM_DEVICE, DMA_PREP_INTERRUPT);
++		if (!mx3_fbi->rot_out_txd) {
++			dev_err(mx3fb->dev, "Cannot allocate descriptor on %d\n",
++				dma_chan->chan_id);
++			return;
++		}
++
++		mx3_fbi->rot_out_txd->callback_param	= mx3_fbi->rot_out_txd;
++		mx3_fbi->rot_out_txd->callback		= mx3fb_dma_done;
++
++		cookie = mx3_fbi->rot_out_txd->tx_submit(mx3_fbi->rot_out_txd);
++		dev_dbg(mx3fb->dev, "%d: Submit %p #%d [%c]\n", __LINE__,
++		       mx3_fbi->rot_out_txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
+ 	} else {
+-		if (!mx3_fbi->txd || !mx3_fbi->txd->tx_submit) {
++		if (!mx3_fbi->display_txd || !mx3_fbi->display_txd->tx_submit) {
+ 			dev_err(mx3fb->dev, "Cannot enable channel %d\n",
+ 				dma_chan->chan_id);
+ 			return;
+@@ -360,14 +483,7 @@ static void sdc_enable_channel(struct mx
+ 		dma_async_issue_pending(dma_chan);
+ 		cookie = mx3_fbi->cookie;
+ 		dev_dbg(mx3fb->dev, "%d: Re-submit %p #%d [%c]\n", __LINE__,
+-		       mx3_fbi->txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
+-	}
+-
+-	if (cookie >= 0) {
+-		spin_lock_irqsave(&mx3fb->lock, flags);
+-		sdc_fb_init(mx3_fbi);
+-		mx3_fbi->cookie = cookie;
+-		spin_unlock_irqrestore(&mx3fb->lock, flags);
++		       mx3_fbi->display_txd, cookie, list_empty(&ichan->queue) ? '-' : '+');
+ 	}
+ 
+ 	/*
+@@ -390,8 +506,8 @@ static void sdc_disable_channel(struct m
+ 
+ 	spin_unlock_irqrestore(&mx3fb->lock, flags);
+ 
+-	mx3_fbi->txd->chan->device->device_terminate_all(mx3_fbi->txd->chan);
+-	mx3_fbi->txd = NULL;
++	mx3_fbi->display_txd->chan->device->device_terminate_all(mx3_fbi->display_txd->chan);
++	mx3_fbi->display_txd = NULL;
+ 	mx3_fbi->cookie = -EINVAL;
+ }
+ 
+@@ -452,7 +568,7 @@ static int sdc_init_panel(struct mx3fb_d
+ 	uint32_t div;
+ 	struct clk *ipu_clk;
+ 
+-	dev_dbg(mx3fb->dev, "panel size = %d x %d", width, height);
++	dev_dbg(mx3fb->dev, " Panel Size: %d x %d\n", width, height);
+ 
+ 	if (v_sync_width == 0 || h_sync_width == 0)
+ 		return -EINVAL;
+@@ -726,12 +842,16 @@ static int __set_par(struct fb_info *fbi
+ 	enum ipu_panel mode = IPU_PANEL_TFT;
+ 	struct mx3fb_info *mx3_fbi = fbi->par;
+ 	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
+-	struct idmac_channel *ichan = mx3_fbi->idmac_channel;
++	struct device *dev = mx3fb->dev;
++	struct mx3fb_platform_data *mx3fb_pdata = dev->platform_data;
++	struct idmac_channel *ichan = mx3_fbi->display_idmac_channel;
+ 	struct idmac_video_param *video = &ichan->params.video;
+-	struct scatterlist *sg = mx3_fbi->sg;
++	struct scatterlist *display_sg = mx3_fbi->display_sg;
++	struct scatterlist *rotation_sg = mx3_fbi->rotation_sg;
++	u32 sdc_xres, sdc_yres;
+ 
+ 	/* Total cleanup */
+-	if (mx3_fbi->txd)
++	if (mx3_fbi->display_txd)
+ 		sdc_disable_channel(mx3_fbi);
+ 
+ 	mx3fb_set_fix(fbi);
+@@ -745,15 +865,35 @@ static int __set_par(struct fb_info *fbi
+ 			return -ENOMEM;
+ 	}
+ 
+-	sg_init_table(&sg[0], 1);
+-	sg_init_table(&sg[1], 1);
++	sg_init_table(&rotation_sg[0], 1);
++	sg_init_table(&rotation_sg[1], 1);
+ 
+-	sg_dma_address(&sg[0]) = fbi->fix.smem_start;
+-	sg_set_page(&sg[0], virt_to_page(fbi->screen_base),
++	sg_dma_address(&rotation_sg[0]) = fbi->fix.smem_start;
++	sg_set_page(&rotation_sg[0], virt_to_page(fbi->screen_base),
+ 		    fbi->fix.smem_len,
+ 		    offset_in_page(fbi->screen_base));
+ 
+-	if (mx3_fbi->ipu_ch == IDMAC_SDC_0) {
++	sg_init_table(&display_sg[0], 1);
++	sg_init_table(&display_sg[1], 1);
++
++	sg_dma_address(&display_sg[0]) = mx3_fbi->rot_buf_physical_addr;
++	sg_set_page(&display_sg[0], virt_to_page(mx3_fbi->rot_buf),
++		    fbi->fix.smem_len,
++		    offset_in_page(mx3_fbi->rot_buf));
++
++	if (mx3fb_pdata->rotation == IPU_ROTATE_90_RIGHT ||
++		mx3fb_pdata->rotation == IPU_ROTATE_90_LEFT)
++	{
++		sdc_xres = fbi->var.yres;
++		sdc_yres = fbi->var.xres;
++	}
++	else
++	{
++		sdc_xres = fbi->var.xres;
++		sdc_yres = fbi->var.yres;
++	}
++
++	if (mx3_fbi->display_ch == IDMAC_SDC_0) {
+ 		memset(&sig_cfg, 0, sizeof(sig_cfg));
+ 		if (fbi->var.sync & FB_SYNC_HOR_HIGH_ACT)
+ 			sig_cfg.Hsync_pol = true;
+@@ -777,7 +917,7 @@ static int __set_par(struct fb_info *fbi
+ 
+ 		if (sdc_init_panel(mx3fb, mode,
+ 				   fbi->var.pixclock * 1000UL,
+-				   fbi->var.xres, fbi->var.yres,
++				   sdc_xres, sdc_yres,
+ 				   (fbi->var.sync & FB_SYNC_SWAP_RGB) ?
+ 				   IPU_PIX_FMT_BGR666 : IPU_PIX_FMT_RGB666,
+ 				   fbi->var.left_margin,
+@@ -794,14 +934,56 @@ static int __set_par(struct fb_info *fbi
+ 		}
+ 	}
+ 
+-	sdc_set_window_pos(mx3fb, mx3_fbi->ipu_ch, 0, 0);
++	sdc_set_window_pos(mx3fb, mx3_fbi->display_ch, 0, 0);
+ 
+ 	mx3_fbi->cur_ipu_buf	= 0;
+ 
+ 	video->out_pixel_fmt	= bpp_to_pixfmt(fbi->var.bits_per_pixel);
++	if (mx3fb_pdata->rotation == IPU_ROTATE_90_RIGHT ||
++		mx3fb_pdata->rotation == IPU_ROTATE_90_LEFT)
++	{
++		video->out_width	= fbi->var.yres;
++		video->out_height	= fbi->var.xres;
++		video->out_stride	= fbi->var.yres_virtual;
++	}
++	else
++	{
++		video->out_width	= fbi->var.xres;
++		video->out_height	= fbi->var.yres;
++		video->out_stride	= fbi->var.xres_virtual;
++	}
++	video->rotation		= IPU_ROTATE_NONE;
++	dev_dbg(mx3fb->dev, " Display Input: %d x %d (out stride: %d)\n", video->out_width, video->out_height, video->out_stride);
++
++	ichan = mx3_fbi->rot_in_idmac_channel;
++	video = &ichan->params.video;
++
++	video->out_pixel_fmt	= bpp_to_pixfmt(fbi->var.bits_per_pixel);
+ 	video->out_width	= fbi->var.xres;
+ 	video->out_height	= fbi->var.yres;
+ 	video->out_stride	= fbi->var.xres_virtual;
++	video->rotation		= mx3fb_pdata->rotation;
++	dev_dbg(mx3fb->dev, " Rotation Input: %d x %d (out stride: %d)\n", video->out_width, video->out_height, video->out_stride);
++
++	ichan = mx3_fbi->rot_out_idmac_channel;
++	video = &ichan->params.video;
++
++	video->out_pixel_fmt	= bpp_to_pixfmt(fbi->var.bits_per_pixel);
++	if (mx3fb_pdata->rotation == IPU_ROTATE_90_RIGHT ||
++		mx3fb_pdata->rotation == IPU_ROTATE_90_LEFT)
++	{
++		video->out_width	= fbi->var.yres;
++		video->out_height	= fbi->var.xres;
++		video->out_stride	= fbi->var.yres_virtual;
++	}
++	else
++	{
++		video->out_width	= fbi->var.xres;
++		video->out_height	= fbi->var.yres;
++		video->out_stride	= fbi->var.xres_virtual;
++	}
++	video->rotation		= IPU_ROTATE_NONE;
++	dev_dbg(mx3fb->dev, " Rotation Output: %d x %d (out stride: %d)\n", video->out_width, video->out_height, video->out_stride);
+ 
+ 	if (mx3_fbi->blank == FB_BLANK_UNBLANK)
+ 		sdc_enable_channel(mx3_fbi);
+@@ -818,7 +1000,7 @@ static int mx3fb_set_par(struct fb_info
+ {
+ 	struct mx3fb_info *mx3_fbi = fbi->par;
+ 	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
+-	struct idmac_channel *ichan = mx3_fbi->idmac_channel;
++	struct idmac_channel *ichan = mx3_fbi->display_idmac_channel;
+ 	int ret;
+ 
+ 	dev_dbg(mx3fb->dev, "%s [%c]\n", __func__, list_empty(&ichan->queue) ? '-' : '+');
+@@ -1043,13 +1225,13 @@ static int mx3fb_pan_display(struct fb_v
+ 	unsigned long base;
+ 	off_t offset;
+ 	dma_cookie_t cookie;
+-	struct scatterlist *sg = mx3_fbi->sg;
+-	struct dma_chan *dma_chan = &mx3_fbi->idmac_channel->dma_chan;
++	struct scatterlist *sg = mx3_fbi->display_sg;
++	struct dma_chan *dma_chan = &mx3_fbi->display_idmac_channel->dma_chan;
+ 	struct dma_async_tx_descriptor *txd;
+ 	int ret;
+ 
+ 	dev_dbg(fbi->device, "%s [%c]\n", __func__,
+-		list_empty(&mx3_fbi->idmac_channel->queue) ? '-' : '+');
++		list_empty(&mx3_fbi->display_idmac_channel->queue) ? '-' : '+');
+ 
+ 	if (var->xoffset > 0) {
+ 		dev_dbg(fbi->device, "x panning not supported\n");
+@@ -1083,14 +1265,14 @@ static int mx3fb_pan_display(struct fb_v
+ 	 * IRQ-handler will disable the IRQ again.
+ 	 */
+ 	init_completion(&mx3_fbi->flip_cmpl);
+-	enable_irq(mx3_fbi->idmac_channel->eof_irq);
++	enable_irq(mx3_fbi->display_idmac_channel->eof_irq);
+ 
+ 	ret = wait_for_completion_timeout(&mx3_fbi->flip_cmpl, HZ / 10);
+ 	if (ret <= 0) {
+ 		mutex_unlock(&mx3_fbi->mutex);
+ 		dev_info(fbi->device, "Panning failed due to %s\n", ret < 0 ?
+ 			 "user interrupt" : "timeout");
+-		disable_irq(mx3_fbi->idmac_channel->eof_irq);
++		disable_irq(mx3_fbi->display_idmac_channel->eof_irq);
+ 		return ret ? : -ETIMEDOUT;
+ 	}
+ 
+@@ -1101,8 +1283,8 @@ static int mx3fb_pan_display(struct fb_v
+ 		    virt_to_page(fbi->screen_base + offset), fbi->fix.smem_len,
+ 		    offset_in_page(fbi->screen_base + offset));
+ 
+-	if (mx3_fbi->txd)
+-		async_tx_ack(mx3_fbi->txd);
++	if (mx3_fbi->display_txd)
++		async_tx_ack(mx3_fbi->display_txd);
+ 
+ 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg +
+ 		mx3_fbi->cur_ipu_buf, 1, DMA_TO_DEVICE, DMA_PREP_INTERRUPT);
+@@ -1130,7 +1312,7 @@ static int mx3fb_pan_display(struct fb_v
+ 		return -EIO;
+ 	}
+ 
+-	mx3_fbi->txd = txd;
++	mx3_fbi->display_txd = txd;
+ 
+ 	fbi->var.xoffset = var->xoffset;
+ 	fbi->var.yoffset = var->yoffset;
+@@ -1235,6 +1417,36 @@ static int mx3fb_map_video_memory(struct
+ {
+ 	int retval = 0;
+ 	dma_addr_t addr;
++	char *fb, *rb;
++	struct mx3fb_info *mx3fbi = fbi->par;
++	struct fb_var_screeninfo *var = &fbi->var;
++	int i;
++
++	mx3fbi->rot_buf = dma_alloc_writecombine(fbi->device,
++						  mem_len,
++						  &addr, GFP_DMA);
++
++	if (!mx3fbi->rot_buf) {
++		dev_err(fbi->device, "Cannot allocate %u bytes rotation buffer memory\n",
++			mem_len);
++		retval = -EBUSY;
++		goto err0;
++	}
++
++	if (lock)
++		mutex_lock(&fbi->mm_lock);
++	mx3fbi->rot_buf_physical_addr = addr;
++	if (lock)
++		mutex_unlock(&fbi->mm_lock);
++
++	dev_dbg(fbi->device, "allocated rotation buffer @ p=0x%08x, v=0x%p, size=%d.\n",
++		(uint32_t) mx3fbi->rot_buf_physical_addr, mx3fbi->rot_buf, mem_len);
++
++	/* copy frame buffer content to newly allocated rotation buffer */
++	rb = mx3fbi->rot_buf;
++	fb = ioremap(fixed_screen_dma, mem_len);
++	for (i = 0; i < mem_len; i++)
++		rb[i] = fb[i];
+ 
+ 	if(!fixed_screen_cpu) {
+ 		fbi->screen_base = dma_alloc_writecombine(fbi->device,
+@@ -1333,7 +1545,8 @@ static struct fb_info *mx3fb_init_fbinfo
+ 	return fbi;
+ }
+ 
+-static int init_fb_chan(struct mx3fb_data *mx3fb, struct idmac_channel *ichan)
++static int init_fb_chan(struct mx3fb_data *mx3fb, struct idmac_channel *disp_ichan,
++						struct idmac_channel *rot_in_ichan, struct idmac_channel *rot_out_ichan)
+ {
+ 	struct device *dev = mx3fb->dev;
+ 	struct mx3fb_platform_data *mx3fb_pdata = dev->platform_data;
+@@ -1344,10 +1557,10 @@ static int init_fb_chan(struct mx3fb_dat
+ 	const struct fb_videomode *mode;
+ 	int ret, num_modes;
+ 
+-	ichan->client = mx3fb;
+-	irq = ichan->eof_irq;
++	disp_ichan->client = mx3fb;
++	irq = disp_ichan->eof_irq;
+ 
+-	if (ichan->dma_chan.chan_id != IDMAC_SDC_0)
++	if (disp_ichan->dma_chan.chan_id != IDMAC_SDC_0)
+ 		return -EINVAL;
+ 
+ 	fbi = mx3fb_init_fbinfo(dev, &mx3fb_ops);
+@@ -1392,14 +1605,18 @@ static int init_fb_chan(struct mx3fb_dat
+ 	sdc_set_color_key(mx3fb, IDMAC_SDC_0, false, 0);
+ 
+ 	mx3fbi			= fbi->par;
+-	mx3fbi->idmac_channel	= ichan;
+-	mx3fbi->ipu_ch		= ichan->dma_chan.chan_id;
++	mx3fbi->display_idmac_channel	= disp_ichan;
++	mx3fbi->display_ch		= disp_ichan->dma_chan.chan_id;
++	mx3fbi->rot_in_idmac_channel	= rot_in_ichan;
++	mx3fbi->rot_in_ch		= rot_in_ichan->dma_chan.chan_id;
++	mx3fbi->rot_out_idmac_channel	= rot_out_ichan;
++	mx3fbi->rot_out_ch		= rot_out_ichan->dma_chan.chan_id;
+ 	mx3fbi->mx3fb		= mx3fb;
+ 	mx3fbi->blank		= FB_BLANK_NORMAL;
+ 
+ 	init_completion(&mx3fbi->flip_cmpl);
+-	disable_irq(ichan->eof_irq);
+-	dev_dbg(mx3fb->dev, "disabling irq %d\n", ichan->eof_irq);
++	disable_irq(disp_ichan->eof_irq);
++	dev_dbg(mx3fb->dev, "disabling irq %d\n", disp_ichan->eof_irq);
+ 	ret = __set_par(fbi, false);
+ 	if (ret < 0)
+ 		goto esetpar;
+@@ -1457,7 +1674,7 @@ static int mx3fb_probe(struct platform_d
+ 	struct resource *sdc_reg;
+ 	struct mx3fb_data *mx3fb;
+ 	dma_cap_mask_t mask;
+-	struct dma_chan *chan;
++	struct dma_chan *disp_chan, *rot_in_chan, *rot_out_chan;
+ 	struct dma_chan_request rq;
+ 
+ 	/*
+@@ -1507,22 +1724,50 @@ static int mx3fb_probe(struct platform_d
+ 	dma_cap_set(DMA_SLAVE, mask);
+ 	dma_cap_set(DMA_PRIVATE, mask);
+ 	rq.id = IDMAC_SDC_0;
+-	chan = dma_request_channel(mask, chan_filter, &rq);
+-	if (!chan) {
++	disp_chan = dma_request_channel(mask, chan_filter, &rq);
++	if (!disp_chan) {
+ 		ret = -EBUSY;
+ 		goto ersdc0;
+ 	}
+ 
++	rq.mx3fb = mx3fb;
++	dma_cap_zero(mask);
++	dma_cap_set(DMA_SLAVE, mask);
++	dma_cap_set(DMA_PRIVATE, mask);
++	rq.id = IDMAC_IC_13;
++	rot_in_chan = dma_request_channel(mask, chan_filter, &rq);
++	if (!rot_in_chan) {
++		ret = -EBUSY;
++		goto eric13;
++	}
++
++	rq.mx3fb = mx3fb;
++	dma_cap_zero(mask);
++	dma_cap_set(DMA_SLAVE, mask);
++	dma_cap_set(DMA_PRIVATE, mask);
++	rq.id = IDMAC_IC_12;
++	rot_out_chan = dma_request_channel(mask, chan_filter, &rq);
++	if (!rot_out_chan) {
++		ret = -EBUSY;
++		goto eric12;
++	}
++
+ 	mx3fb->backlight_level = 255;
+ 
+-	ret = init_fb_chan(mx3fb, to_idmac_chan(chan));
++	ret = init_fb_chan(mx3fb, to_idmac_chan(disp_chan),
++							  to_idmac_chan(rot_in_chan),
++							  to_idmac_chan(rot_out_chan));
+ 	if (ret < 0)
+ 		goto eisdc0;
+ 
+ 	return 0;
+ 
+ eisdc0:
+-	dma_release_channel(chan);
++	dma_release_channel(rot_out_chan);
++eric12:
++	dma_release_channel(rot_in_chan);
++eric13:
++	dma_release_channel(disp_chan);
+ ersdc0:
+ 	dmaengine_put();
+ 	iounmap(mx3fb->reg_base);
+@@ -1539,7 +1784,7 @@ static int mx3fb_remove(struct platform_
+ 	struct mx3fb_info *mx3_fbi = fbi->par;
+ 	struct dma_chan *chan;
+ 
+-	chan = &mx3_fbi->idmac_channel->dma_chan;
++	chan = &mx3_fbi->display_idmac_channel->dma_chan;
+ 	release_fbi(fbi);
+ 
+ 	dma_release_channel(chan);

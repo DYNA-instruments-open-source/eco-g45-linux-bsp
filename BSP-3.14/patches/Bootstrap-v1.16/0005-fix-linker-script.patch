@@ -1,0 +1,13 @@
+Index: Bootstrap-v1.16/elf32-littlearm.lds
+===================================================================
+--- Bootstrap-v1.16.orig/elf32-littlearm.lds
++++ Bootstrap-v1.16/elf32-littlearm.lds
+@@ -14,7 +14,7 @@ SECTIONS
+ 	}
+ 
+ 	/* collect all initialized .data sections */
+-	.data : AT ( ADDR (.text) + SIZEOF (.text) ) { 
++	.data : { 
+ 		_sdata = .;
+ 		*(.vectors)
+ 		*(.data)

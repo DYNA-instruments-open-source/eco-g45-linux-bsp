@@ -1,0 +1,7 @@
+## SECTION=shell_and_console
+
+config URJTAG
+	tristate
+	prompt "urjtag"
+	help
+	  FIXME

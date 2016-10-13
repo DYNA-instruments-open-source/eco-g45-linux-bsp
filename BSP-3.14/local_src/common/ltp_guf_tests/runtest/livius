@@ -1,0 +1,9 @@
+#DESCRIPTION: NESO-LT Platform Tests
+#---------------------------------------
+Backlight					backlight
+RTC							rtccheck -v 2010.09.01-12:19 -d 10
+RS485_pingpong				rs485pingpong -d /dev/ttymxc2 -b 8 -r 100
+MMC_fs_fat32 				mmc -t vfat
+MMC_write_10MB				(mount | grep mnt/mmc && fwrite -n /mnt/mmc/file1M -b 1048576 -i 10)
+USB_host					mstick -n 1
+USB_stick_write_10MB		(mount | grep mnt/mstick1 && fwrite -n /mnt/mstick1/file1M -b 1048576 -i 10)

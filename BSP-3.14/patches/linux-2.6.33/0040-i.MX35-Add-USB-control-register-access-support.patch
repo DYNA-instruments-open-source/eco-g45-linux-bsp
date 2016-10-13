@@ -1,0 +1,100 @@
+From dffa47ad0863bbf57106d578fb6be16264c241c1 Mon Sep 17 00:00:00 2001
+From: Sascha Hauer <s.hauer@pengutronix.de>
+Date: Thu, 4 Feb 2010 14:34:48 +0100
+Subject: [PATCH 40/59] i.MX35: Add USB control register access support
+
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+Cc: Daniel Mack <daniel@caiaq.de>
+---
+ arch/arm/plat-mxc/ehci.c                  |   55 +++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mxc_ehci.h |    4 ++
+ 2 files changed, 59 insertions(+), 0 deletions(-)
+
+Index: linux-2.6.33/arch/arm/plat-mxc/ehci.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/ehci.c
++++ linux-2.6.33/arch/arm/plat-mxc/ehci.c
+@@ -38,6 +38,18 @@
+ #define MX31_H1_PM_BIT		(1 << 8)
+ #define MX31_H1_DT_BIT		(1 << 4)
+ 
++#define MX35_OTG_SIC_SHIFT	29
++#define MX35_OTG_SIC_MASK	(0x3 << MX35_OTG_SIC_SHIFT)
++#define MX35_OTG_PM_BIT		(1 << 24)
++
++#define MX35_H1_SIC_SHIFT	21
++#define MX35_H1_SIC_MASK	(0x3 << MX35_H1_SIC_SHIFT)
++#define MX35_H1_PM_BIT		(1 << 8)
++#define MX35_H1_IPPUE_UP_BIT	(1 << 7)
++#define MX35_H1_IPPUE_DOWN_BIT	(1 << 6)
++#define MX35_H1_TLL_BIT		(1 << 5)
++#define MX35_H1_USBTE_BIT	(1 << 4)
++
+ int mxc_set_usbcontrol(int port, unsigned int flags)
+ {
+ 	unsigned int v;
+@@ -85,6 +97,49 @@ int mxc_set_usbcontrol(int port, unsigne
+ 				     USBCTRL_OTGBASE_OFFSET));
+ 		return 0;
+ 	}
++
++	if (cpu_is_mx35()) {
++		v = readl(MX35_IO_ADDRESS(MX35_OTG_BASE_ADDR +
++				     USBCTRL_OTGBASE_OFFSET));
++
++		switch (port) {
++		case 0:	/* OTG port */
++			v &= ~(MX35_OTG_SIC_MASK | MX35_OTG_PM_BIT);
++			v |= (flags & MXC_EHCI_INTERFACE_MASK)
++					<< MX35_OTG_SIC_SHIFT;
++			if (!(flags & MXC_EHCI_POWER_PINS_ENABLED))
++				v |= MX35_OTG_PM_BIT;
++
++			break;
++		case 1: /* H1 port */
++			v &= ~(MX35_H1_SIC_MASK | MX35_H1_PM_BIT | MX35_H1_TLL_BIT |
++				MX35_H1_USBTE_BIT | MX35_H1_IPPUE_DOWN_BIT | MX35_H1_IPPUE_UP_BIT);
++			v |= (flags & MXC_EHCI_INTERFACE_MASK)
++						<< MX35_H1_SIC_SHIFT;
++			if (!(flags & MXC_EHCI_POWER_PINS_ENABLED))
++				v |= MX35_H1_PM_BIT;
++
++			if (!(flags & MXC_EHCI_TTL_ENABLED))
++				v |= MX35_H1_TLL_BIT;
++
++			if (flags & MXC_EHCI_INTERNAL_PHY)
++				v |= MX35_H1_USBTE_BIT;
++
++			if (flags & MXC_EHCI_IPPUE_DOWN)
++				v |= MX35_H1_IPPUE_DOWN_BIT;
++
++			if (flags & MXC_EHCI_IPPUE_UP)
++				v |= MX35_H1_IPPUE_UP_BIT;
++
++			break;
++		default:
++			return -EINVAL;
++		}
++
++		writel(v, MX35_IO_ADDRESS(MX35_OTG_BASE_ADDR +
++				     USBCTRL_OTGBASE_OFFSET));
++		return 0;
++	}
+ #endif /* CONFIG_ARCH_MX3 */
+ #ifdef CONFIG_MACH_MX27
+ 	if (cpu_is_mx27()) {
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mxc_ehci.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mxc_ehci.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mxc_ehci.h
+@@ -22,6 +22,10 @@
+ #define MXC_EHCI_POWER_PINS_ENABLED	(1 << 5)
+ #define MXC_EHCI_TTL_ENABLED		(1 << 6)
+ 
++#define MXC_EHCI_INTERNAL_PHY		(1 << 7)
++#define MXC_EHCI_IPPUE_DOWN		(1 << 8)
++#define MXC_EHCI_IPPUE_UP		(1 << 9)
++
+ struct mxc_usbh_platform_data {
+ 	int (*init)(struct platform_device *pdev);
+ 	int (*exit)(struct platform_device *pdev);

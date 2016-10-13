@@ -1,0 +1,56 @@
+Index: linux-2.6.33/drivers/video/imxfb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/imxfb.c
++++ linux-2.6.33/drivers/video/imxfb.c
+@@ -351,8 +351,13 @@ static int imxfb_check_var(struct fb_var
+ 	var->sync		= imxfb_mode->mode.sync;
+ 	var->xres_virtual	= max(var->xres_virtual, var->xres);
+ 	var->yres_virtual	= max(var->yres_virtual, var->yres);
+-
++	
+ 	pr_debug("var->bits_per_pixel=%d\n", var->bits_per_pixel);
++	
++	if (imxfb_mode->bpp_used != 0)
++		var->bits_per_pixel	= imxfb_mode->bpp_used;
++	else
++		var->bits_per_pixel	= imxfb_mode->bpp;
+ 
+ 	lcd_clk = clk_get_rate(fbi->clk);
+ 
+@@ -370,6 +375,16 @@ static int imxfb_check_var(struct fb_var
+ 	}
+ 
+ 	switch (var->bits_per_pixel) {
++	case 24:
++		pcr |= PCR_BPIX_24 | PCR_END_BYTE_SWAP;
++		rgb = &def_rgb_18;
++		var->bits_per_pixel = 32;
++		break;
++	case 18:
++		pcr |= PCR_BPIX_18 | PCR_END_SEL;
++		rgb = &def_rgb_18;
++		var->bits_per_pixel = 32;
++		break;
+ 	case 32:
+ 		pcr |= PCR_BPIX_18;
+ 		rgb = &def_rgb_18;
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/imxfb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/imxfb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/imxfb.h
+@@ -17,6 +17,7 @@
+ #define PCR_BPIX_12	(4 << 25)
+ #define PCR_BPIX_16	(5 << 25)
+ #define PCR_BPIX_18	(6 << 25)
++#define PCR_BPIX_24	(7 << 25)
+ #define PCR_PIXPOL	(1 << 24)
+ #define PCR_FLMPOL	(1 << 23)
+ #define PCR_LPPOL	(1 << 22)
+@@ -53,6 +54,7 @@ struct imx_fb_videomode {
+ 	struct fb_videomode mode;
+ 	u32 pcr;
+ 	unsigned char	bpp;
++	unsigned char	bpp_used;
+ };
+ 
+ struct imx_fb_platform_data {

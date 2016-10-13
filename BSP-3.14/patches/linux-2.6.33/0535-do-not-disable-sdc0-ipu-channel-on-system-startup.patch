@@ -1,0 +1,18 @@
+Index: linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+===================================================================
+--- linux-2.6.33.orig/drivers/dma/ipu/ipu_idmac.c
++++ linux-2.6.33/drivers/dma/ipu/ipu_idmac.c
+@@ -1575,8 +1575,12 @@ static int idmac_alloc_chan_resources(st
+ 	/*
+ 	 * Important to first disable the channel, because maybe someone
+ 	 * used it before us, e.g., the bootloader
++	 * In the case of the dispay we want to preserve the bootloader
++	 * settings
+ 	 */
+-	ipu_disable_channel(idmac, ichan, true);
++	if(ichan->dma_chan.chan_id != IDMAC_SDC_0) {
++		ipu_disable_channel(idmac, ichan, true);
++	}
+ 
+ 	ret = ipu_init_channel(idmac, ichan);
+ 	if (ret < 0)

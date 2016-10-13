@@ -1,0 +1,74 @@
+#!/bin/sh
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/sbin:/usr/local/bin
+NAME=thd
+PNAME=triggerhappy
+DAEMON=/usr/sbin/thd
+PIDFILE=/var/run/$NAME.pid
+DAEMON_ARGS="--daemon --pidfile $PIDFILE --socket /var/run/thd.socket"
+DAEMON_ARGS="$DAEMON_ARGS --triggers @TRIGGERS@"
+DAEMON_ARGS="$DAEMON_ARGS --user @USER@"
+DAEMON_ARGS="$DAEMON_ARGS @INPUT_DEV@"
+
+[ -r /etc/default/$PNAME ] && . /etc/default/$PNAME
+
+case "$1" in
+ start)
+ echo -n "starting $PNAME..."
+ start-stop-daemon -S -x "$DAEMON" -p "$PIDFILE" -- $DAEMON_ARGS > /dev/null 2>&1
+ if [ "$?" = "0" ]; then
+ echo "done"
+ else
+ echo "failed"
+ exit 1
+ fi
+ ;;
+
+ stop)
+ echo -n "stopping $PNAME..."
+ start-stop-daemon -K -p $PIDFILE > /dev/null 2>&1
+ if [ "$?" = "0" ]; then
+ echo "done"
+ else
+ echo "failed"
+ exit 1
+ fi
+ ;;
+
+ restart|force-reload)
+ echo -n "restarting $PNAME..."
+ start-stop-daemon -K -x "$DAEMON" -p $PIDFILE > /dev/null 2>&1
+ if [ "$?" = "0" ]; then
+ echo "done"
+ else
+ echo "failed"
+ exit 1
+ fi
+ sleep 1
+ start-stop-daemon -S -x "$DAEMON" -p $PIDFILE > /dev/null 2>&1
+ if [ "$?" = "0" ]; then
+ echo "done"
+ else
+ echo "failed"
+ exit 1
+ fi
+ ;;
+
+ reload)
+ echo -n "reloading $PNAME..."
+ start-stop-daemon -K -x "$DAEMON" -p $PIDFILE -s 1 > /dev/null 2>&1
+ if [ "$?" = "0" ]; then
+ echo "done"
+ else
+ echo "failed"
+ exit 1
+ fi
+ ;;
+
+ *)
+ echo "Usage: $0 {start|stop|restart|force-reload|reload}" >&2
+ exit 1
+ ;;
+esac
+
+exit 0

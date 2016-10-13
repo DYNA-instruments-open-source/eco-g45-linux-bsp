@@ -1,0 +1,376 @@
+Index: tslib-1.0/tests/ts_calibrate.c
+===================================================================
+--- tslib-1.0.orig/tests/ts_calibrate.c
++++ tslib-1.0/tests/ts_calibrate.c
+@@ -17,6 +17,7 @@
+ #include <signal.h>
+ #include <string.h>
+ #include <unistd.h>
++#include <getopt.h>
+ #include <sys/fcntl.h>
+ #include <sys/ioctl.h>
+ #include <sys/mman.h>
+@@ -30,6 +31,47 @@
+ #include "fbutils.h"
+ #include "testutils.h"
+ 
++#define GF_VERSION "ts_calibrate 1.2-SVN: $Revision: 1385 $"
++
++#define TS_XML_DISABLE_PATH "/sys/devices/virtual/misc/guf_xml/configurationFile/variables/setting_disable_calibration/value"
++#define TS_XML_DISABLE_VALUE "true"
++#define TS_HW_FIRMWARE_PATH	"/lib/firmware/"
++#define TS_HW_FIRMWARE_FILE_NAME "ts_cal.fw"
++#define TS_SYSFS_CLASS_PATH_TO_INPUT "/sys/class/input/"
++#define TS_SYSFS_CLASS_PATH_FROM_INPUT_TO_DEV "/device/device/"
++#define TS_SYSFS_DEVICE_CALIBRATE_ATTRIB "calibrated"
++#define TS_SYSFS_DEVICE_CALIBRATE_DATA_ATTRIB "cal_data"
++#define TS_SYSFS_DEVICE_CALIBRATE_DATA_LENGTH 92 * 2
++#define TS_PINNACLE_CAL_REG_START 0x1df
++#define TS_MAX_BUFFER_STRING_LEN	256
++#define TS_STORE_FIRMWARE_BUFFER_SIZE 5
++#define TS_STORE_FIRMWARE_SLEEP_TIME 250
++static char input_name_buffer[TS_MAX_BUFFER_STRING_LEN];
++static char sysfs_cal_attr_string[TS_MAX_BUFFER_STRING_LEN];
++static char calibate_data[TS_SYSFS_DEVICE_CALIBRATE_DATA_LENGTH];
++static pthread_t firmware_thread = 0;
++static const char* CALIBRATION_FILE_CFG_HEADER[12] = {
++	"This is a touch configuration file for the pinnacle capacitive touch controller via I2C bus.\n",
++	"address: a: 0x[UINT16] (write length: [BYTE] write data: 0x[BYTE] 0x[BYTE] 0x[BYTE] 0x[BYTE]) (read length: [BYTE] read verification: 0x[BYTE] 0x[BYTE] 0x[BYTE] 0x[BYTE]) (read verification: 0x[BYTE] 0x[BYTE] 0x[BYTE] 0x[BYTE]) enable read verification: [0 | 1] sleep time in ms after one line: [UINT32] wait for interrupt mask: [BYTE]\n",
++	"!!! 1 line free for the parser\n",
++	"\n",
++	"a: 0x0000 (wl: 0 w: 0x00 0x00 0x00 0x00) (rl: 1 r: 0x07 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 1 s: 0 i:0x0\n",
++	"a: 0x0001 (wl: 0 w: 0x00 0x00 0x00 0x00) (rl: 1 r: 0x3A 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 1 s: 0 i:0x0\n",
++	"a: 0x001F (wl: 0 w: 0x00 0x00 0x00 0x00) (rl: 1 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 1 s: 0 i:0x0\n",
++	"a: 0x0048 (wl: 0 w: 0x00 0x00 0x00 0x00) (rl: 4 r: 0x00 0x40 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 1 s: 0 i:0x0\n",
++	"a: 0x00EE (wl: 1 w: 0x0B 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	"a: 0x000A (wl: 1 w: 0x02 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	"a: 0x0003 (wl: 1 w: 0x08 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	NULL
++};
++static const char* CALIBRATION_FILE_CFG_FOOTER[4] = {
++	"a: 0x0003 (wl: 1 w: 0x00 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	"a: 0x0007 (wl: 1 w: 0x1A 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	"a: 0x0004 (wl: 1 w: 0x23 0x00 0x00 0x00) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n",
++	NULL
++};
++static const char CFG_FILE_FORMAT_OUTPUT[] = "a: 0x%04x (wl: %d w: 0x%02x 0x%02x 0x%02x 0x%02x) (rl: 0 r: 0x00 0x00 0x00 0x00) (v: 0xFF 0xFF 0xFF 0xFF) ev: 0 s: 0 i:0x0\n";
++
+ static int palette [] =
+ {
+ 	0x000000, 0xffe080, 0xffffff, 0xe0c0a0
+@@ -120,7 +162,7 @@ int perform_calibration(calibration *cal
+ // If we got here, we're OK, so assign scaling to a[6] and return
+ 	cal->a[6] = (int)scaling;
+ 	return 1;
+-/*	
++/*
+ // This code was here originally to just insert default values
+ 	for(j=0;j<7;j++) {
+ 		c->a[j]=0;
+@@ -162,7 +204,136 @@ static void get_sample (struct tsdev *ts
+ 	printf("%s : X = %4d Y = %4d\n", name, cal->x [index], cal->y [index]);
+ }
+ 
+-int main()
++static int store_firmware(int sysfs_device_fd) {
++	char buffer[TS_STORE_FIRMWARE_BUFFER_SIZE];
++	ssize_t char_read;
++	int thread_finished = 0;
++	FILE* output = NULL;
++	int counter;
++
++	while(thread_finished == 0) {
++		char_read = read(sysfs_device_fd, buffer, TS_STORE_FIRMWARE_BUFFER_SIZE);
++		if (char_read == -1) {
++			perror("Failed reading calibrated attribute. Terminating thread.\n");
++			return -1;
++		}
++
++		if (buffer[0] == '1') {
++			close(sysfs_device_fd);
++			sysfs_device_fd = open(input_name_buffer, O_RDONLY);
++			if (sysfs_device_fd == -1) {
++				perror("Failed reading calibrated data attribute. Terminating thread.\n");
++				return -1;
++			}
++			char_read = read(sysfs_device_fd, calibate_data, TS_SYSFS_DEVICE_CALIBRATE_DATA_LENGTH);
++			if (char_read == -1) {
++				perror("Failed reading the complete calibrated data. Terminating thread.\n");
++				close(sysfs_device_fd);
++				return -1;
++			}
++			close(sysfs_device_fd);
++			output = fopen(TS_HW_FIRMWARE_PATH TS_HW_FIRMWARE_FILE_NAME, "w");
++			if (output == NULL) {
++				perror("Failed creating firmware file. Terminating thread.\n");
++				return -1;
++			}
++			for (counter = 0; CALIBRATION_FILE_CFG_HEADER[counter]; counter++) {
++				if (fputs(CALIBRATION_FILE_CFG_HEADER[counter], output) < 0) {
++					perror("Failed writing header into firmware config file. Terminating thread.\n");
++					fclose(output);
++					return -1;
++				}
++			}
++			for (counter = 0; counter < (char_read >> 2); counter++) {
++				if (fprintf(output, CFG_FILE_FORMAT_OUTPUT, TS_PINNACLE_CAL_REG_START + (counter<<2),
++							4, calibate_data[(counter<<2)], calibate_data[(counter<<2)+1],
++							calibate_data[(counter<<2)+2], calibate_data[(counter<<2)+3]) < 0) {
++					perror("Failed writing calibration data into firmware config file. Terminating thread.\n");
++					fclose(output);
++					return -1;
++				}
++			}
++			switch (char_read & 0x3) {
++				case 1:
++					if (fprintf(output, CFG_FILE_FORMAT_OUTPUT, TS_PINNACLE_CAL_REG_START + (counter<<2),
++								1, calibate_data[(counter<<2)], 0, 0, 0) < 0) {
++						perror("Failed writing calibration data into firmware config file. Terminating thread.\n");
++						fclose(output);
++						return -1;
++					}
++					break;
++
++				case 2:
++					if (fprintf(output, CFG_FILE_FORMAT_OUTPUT, TS_PINNACLE_CAL_REG_START + (counter<<2),
++								2, calibate_data[(counter<<2)], calibate_data[(counter<<2)+1], 0 , 0) < 0) {
++						perror("Failed writing calibration data into firmware config file. Terminating thread.\n");
++						fclose(output);
++						return -1;
++					}
++					break;
++
++				case 3:
++					if (fprintf(output, CFG_FILE_FORMAT_OUTPUT, TS_PINNACLE_CAL_REG_START + (counter<<2),
++								3, calibate_data[(counter<<2)], calibate_data[(counter<<2)+1], calibate_data[(counter<<2)+2], 0) < 0) {
++						perror("Failed writing calibration data into firmware config file. Terminating thread.\n");
++						fclose(output);
++						return -1;
++					}
++					break;
++			}
++			for (counter = 0; CALIBRATION_FILE_CFG_FOOTER[counter]; counter++) {
++				if (fputs(CALIBRATION_FILE_CFG_FOOTER[counter], output) < 0) {
++					perror("Failed writing footer into firmware config file. Terminating thread.\n");
++					fclose(output);
++					return -1;
++				}
++			}
++			fclose(output);
++			thread_finished = 1;
++		} else {
++			close(sysfs_device_fd);
++			sleep(TS_STORE_FIRMWARE_SLEEP_TIME);
++			sysfs_device_fd = open(sysfs_cal_attr_string, O_RDONLY);
++			if (sysfs_device_fd == -1) {
++				perror("Failed reopening firmware config file. Terminating thread.\n");
++				return -1;
++			}
++		}
++	}
++	return 0;
++}
++
++static void *hw_store_firmware( void *ptr ) {
++	store_firmware(*(int*)ptr);
++}
++
++static int is_calibration_disabled_via_XML(char* path, char* value) {
++	char buffer[sizeof(TS_XML_DISABLE_VALUE)+2];
++	ssize_t char_read;
++	int xml_file_id;
++
++	xml_file_id = open(path, O_RDONLY);
++	if (xml_file_id == -1) {
++		//printf("ts_calibrate: no file found at path %s.\n", path);
++		return 0;
++	}
++	char_read = read(xml_file_id, buffer, sizeof(TS_XML_DISABLE_VALUE)+2);
++	if (char_read == -1) {
++		//printf("ts_calibrate: failed reading path.\n");
++		return 0;
++	}
++	close(xml_file_id);
++	buffer[sizeof(TS_XML_DISABLE_VALUE)+1] = '\0';
++	if (strncasecmp(buffer, value, strlen(value)) != 0) {
++		//printf("ts_calibrate: read '%s' expected '%s'.\n", buffer, value);
++		return 0;
++	}
++	return 1;
++}
++
++#define DEFAULT_EVENT_NAME "/dev/input/event0"
++#define DEFAULT_CAL_FILE "/etc/pointercal"
++int main(int argc, char *argv[])
+ {
+ 	struct tsdev *ts;
+ 	calibration cal;
+@@ -171,28 +342,122 @@ int main()
+ 	char *tsdevice = NULL;
+ 	char *calfile = NULL;
+ 	unsigned int i;
++	int firmware_fd, sysfs_device_fd;
++	char* buffer = NULL;
++	char* input_name = NULL;
++	int skip_cal_if_cal_present = 0;
++	int force_calibration = 0;
++	static const struct option options[] = {
++		{ "skip-if-cal-present", no_argument, NULL, 's' },
++		{ "force-cal", no_argument, NULL, 'f' },
++		{ "help", no_argument, NULL, 'h' },
++		{ "version", no_argument, NULL, 'V' },
++		{}
++	};
+ 
+ 	signal(SIGSEGV, sig);
+ 	signal(SIGINT, sig);
+ 	signal(SIGTERM, sig);
+ 
+-	if( (tsdevice = getenv("TSLIB_TSDEVICE")) != NULL ) {
+-		ts = ts_open(tsdevice,0);
+-	} else {
+-		ts = ts_open("/dev/input/event0", 0);
++	while (1) {
++		int option;
++
++		option = getopt_long(argc, argv, "sfhV", options, NULL);
++		if (option == -1)
++			break;
++
++		switch (option) {
++		case 's':
++			if (force_calibration == 0)
++				skip_cal_if_cal_present = 1;
++			break;
++
++		case 'f':
++			force_calibration = 1;
++			skip_cal_if_cal_present = 0;
++			break;
++
++		case 'h':
++			printf("Usage: ts_calibrate [--help] [--skip-if-cal-present] [--force_cal] [--version]\n");
++			exit(0);
++
++		case 'V':
++		default:
++			printf("%s\n", GF_VERSION);
++			exit(0);
++		}
++	}
++
++	if( (tsdevice = getenv("TSLIB_TSDEVICE")) == NULL ) {
++		tsdevice = DEFAULT_EVENT_NAME;
+ 	}
+ 
++	ts = ts_open(tsdevice,0);
+ 	if (!ts) {
+ 		perror("ts_open");
+ 		exit(1);
+ 	}
++
++	//printf("b. tsdevice=%s\n", tsdevice);
++	// find the input device event name
++	buffer = strchr(tsdevice, '/');
++	while (buffer) {
++		input_name = buffer + 1;
++		buffer = strchr(input_name, '/');
++	}
++	if (!input_name) {
++		goto test_calibration;
++	}
++	//printf("c. input_name=%s\n", input_name);
++	strcpy(sysfs_cal_attr_string, TS_SYSFS_CLASS_PATH_TO_INPUT);
++	strcat(sysfs_cal_attr_string, input_name);
++	strcat(sysfs_cal_attr_string, TS_SYSFS_CLASS_PATH_FROM_INPUT_TO_DEV);
++	strcpy(input_name_buffer, sysfs_cal_attr_string);
++	strcat(sysfs_cal_attr_string, TS_SYSFS_DEVICE_CALIBRATE_ATTRIB);
++	strcat(input_name_buffer, TS_SYSFS_DEVICE_CALIBRATE_DATA_ATTRIB);
++
++	//printf("d. sysfs_cal_attr_string=%s, input_name_buffer=%s\n", sysfs_cal_attr_string, input_name_buffer);
++	sysfs_device_fd = open(sysfs_cal_attr_string, O_RDONLY);
++	if (sysfs_device_fd == -1) {
++		goto test_calibration;
++	}
++
++	firmware_fd = open(TS_HW_FIRMWARE_PATH TS_HW_FIRMWARE_FILE_NAME, O_RDONLY);
++	if (firmware_fd != -1) {
++		perror("Hardware calibration file present. Skipping write.\n");
++		close(sysfs_device_fd);
++		close(firmware_fd);
++		goto test_calibration;
++	}
++
++	if (store_firmware(sysfs_device_fd) != 0) {
++		perror("Failed storing firmware. Skipping write.\n");
++	}
++
++test_calibration:
++	if  ((force_calibration == 0) && (is_calibration_disabled_via_XML(TS_XML_DISABLE_PATH, TS_XML_DISABLE_VALUE) != 0)) {
++		printf("ts_calibrate: Automatic calibration is disabled via redboot, skipping calibration.\n");
++		exit(0);
++	}
++
++	if ((calfile = getenv("TSLIB_CALIBFILE")) == NULL) {
++		calfile = DEFAULT_CAL_FILE;
++	}
++
++	cal_fd = open (calfile, O_RDWR);
++	if ((cal_fd != -1) && skip_cal_if_cal_present) {
++		close (cal_fd);
++		exit(0);
++	}
++	close (cal_fd);
++
++	//perform_calibration
+ 	if (ts_config(ts)) {
+ 		perror("ts_config");
+ 		exit(1);
+ 	}
+ 
+ 	if (open_framebuffer()) {
+-		close_framebuffer();
+ 		exit(1);
+ 	}
+ 
+@@ -205,10 +470,6 @@ int main()
+ 			   "Touch crosshair to calibrate", 2);
+ 
+ 	printf("xres = %d, yres = %d\n", xres, yres);
+-
+-// Read a touchscreen event to clear the buffer
+-	//getxy(ts, 0, 0);
+-
+ 	get_sample (ts, &cal, 0, 50,        50,        "Top left");
+ 	get_sample (ts, &cal, 1, xres - 50, 50,        "Top right");
+ 	get_sample (ts, &cal, 2, xres - 50, yres - 50, "Bot right");
+@@ -219,22 +480,24 @@ int main()
+ 		printf ("Calibration constants: ");
+ 		for (i = 0; i < 7; i++) printf("%d ", cal.a [i]);
+ 		printf("\n");
+-		if ((calfile = getenv("TSLIB_CALIBFILE")) != NULL) {
+-			cal_fd = open (calfile, O_CREAT | O_RDWR);
+-		} else {
+-			cal_fd = open ("/etc/pointercal", O_CREAT | O_RDWR);
++		cal_fd = open (calfile, O_CREAT | O_RDWR);
++		if (cal_fd == -1) {
++			perror("Failed creating cal file.\n");
++			i = -1;
++			goto exit;
+ 		}
+ 		sprintf (cal_buffer,"%d %d %d %d %d %d %d",
+ 			 cal.a[1], cal.a[2], cal.a[0],
+ 			 cal.a[4], cal.a[5], cal.a[3], cal.a[6]);
+ 		write (cal_fd, cal_buffer, strlen (cal_buffer) + 1);
+ 		close (cal_fd);
+-                i = 0;
++        i = 0;
+ 	} else {
+ 		printf("Calibration failed.\n");
+ 		i = -1;
+ 	}
+ 
++exit:
+ 	fillrect (0, 0, xres - 1, yres - 1, 0);
+ 	close_framebuffer();
+ 	return i;

@@ -1,0 +1,41 @@
+From 029050afacd20e0bbc7e32a8b6c13ea28b8da114 Mon Sep 17 00:00:00 2001
+From: Roel Kluin <roel.kluin@gmail.com>
+Date: Wed, 3 Feb 2010 20:19:00 +0100
+Subject: [PATCH 37/59] MX1/MX2: -EINVAL overwritten in second iteration in mxc_gpio_setup_multiple_pins()
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Due to the `ret = gpio_request()' below in the loop, the initial -EINVAL value
+of ret is overwritten.
+
+Signed-off-by: Roel Kluin <roel.kluin@gmail.com>
+Acked-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+---
+ arch/arm/plat-mxc/iomux-mx1-mx2.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+Index: linux-2.6.33/arch/arm/plat-mxc/iomux-mx1-mx2.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/iomux-mx1-mx2.c
++++ linux-2.6.33/arch/arm/plat-mxc/iomux-mx1-mx2.c
+@@ -116,14 +116,16 @@ int mxc_gpio_setup_multiple_pins(const i
+ 	int i;
+ 	unsigned gpio;
+ 	unsigned mode;
+-	int ret = -EINVAL;
++	int ret;
+ 
+ 	for (i = 0; i < count; i++) {
+ 		gpio = *p & (GPIO_PIN_MASK | GPIO_PORT_MASK);
+ 		mode = *p & ~(GPIO_PIN_MASK | GPIO_PORT_MASK);
+ 
+-		if (gpio >= (GPIO_PORT_MAX + 1) * 32)
++		if (gpio >= (GPIO_PORT_MAX + 1) * 32) {
++			ret = -EINVAL;
+ 			goto setup_error;
++		}
+ 
+ 		ret = gpio_request(gpio, label);
+ 		if (ret)

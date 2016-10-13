@@ -1,0 +1,112 @@
+--- a/drivers/spi/spi-atmel.c
++++ b/drivers/spi/spi-atmel.c
+@@ -3,7 +3,7 @@
+  *
+  * Copyright (C) 2006 Atmel Corporation
+  * Copyright (C) 2014 DYNA Instruments GmbH Hamburg,
+- * Copyright (c) 2014 Johannes Lode <linuxer@quantentunnel.de>
++ * Copyright (C) 2014 Johannes Lode <linuxer@quantentunnel.de>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -241,9 +241,6 @@ struct atmel_spi {
+ 	bool			use_pdc;
+ 	/* dma engine data */
+ 	struct atmel_spi_dma	dma;
+-
+-	bool			keep_cs;
+-	bool			cs_active;
+ };
+ 
+ /* Controller-specific per-slave state */
+@@ -1008,7 +1005,7 @@ static int atmel_spi_setup(struct spi_de
+ 	if (!atmel_spi_is_v2(as)
+ 			&& spi->chip_select == 0
+ 			&& (spi->mode & SPI_CS_HIGH)) {
+-		dev_dbg(&spi->dev, "setup: can't be active-high\n");
++		dev_dbg(&spi->dev, "setup: CS can't be active-high\n");
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1199,19 +1196,6 @@ static int atmel_spi_one_transfer(struct
+ 	if (xfer->delay_usecs)
+ 		udelay(xfer->delay_usecs);
+ 
+-	if (xfer->cs_change) {
+-		if (list_is_last(&xfer->transfer_list,
+-				 &msg->transfers)) {
+-			as->keep_cs = true;
+-		} else {
+-			as->cs_active = !as->cs_active;
+-			if (as->cs_active)
+-				cs_activate(as, msg->spi);
+-			else
+-				cs_deactivate(as, msg->spi);
+-		}
+-	}
+-
+ 	return 0;
+ }
+ 
+@@ -1222,6 +1206,7 @@ static int atmel_spi_transfer_one_messag
+ 	struct spi_transfer *xfer;
+ 	struct spi_device *spi = msg->spi;
+ 	int ret = 0;
++	bool cs_change = 1;
+ 
+ 	as = spi_master_get_devdata(master);
+ 
+@@ -1234,18 +1219,39 @@ static int atmel_spi_transfer_one_messag
+ 	atmel_spi_lock(as);
+ 	cs_activate(as, spi);
+ 
+-	as->cs_active = true;
+-	as->keep_cs = false;
+-
+ 	msg->status = 0;
+ 	msg->actual_length = 0;
+ 
+ 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
++	  if (cs_change)
++      cs_activate(as, msg->spi);
++
++	  cs_change = xfer->cs_change;
+ 		ret = atmel_spi_one_transfer(master, msg, xfer);
+-		if (ret)
++
++    /* normally deactivate chipselect ... unless no error and
++     * cs_change has hinted that the next message will probably
++     * be for this chip too.
++     */
++		if (ret) {
++      cs_deactivate(as, spi);
+ 			goto msg_done;
+ 		}
+ 
++		if (cs_change) {
++	    if (!list_is_last(&xfer->transfer_list,
++	         &msg->transfers)) {
++	      cs_deactivate(as, spi);
++	      ndelay(50);
++	    }
++	  } else {
++	    if (list_is_last(&xfer->transfer_list,
++           &msg->transfers))
++	      cs_deactivate(as, msg->spi);
++	  }
++	}
++
++  // FIXME: do we really need this, if the code does everything properly
+ 	if (as->use_pdc)
+ 		atmel_spi_disable_pdc_transfer(as);
+ 
+@@ -1258,9 +1264,6 @@ static int atmel_spi_transfer_one_messag
+ 	}
+ 
+ msg_done:
+-	if (!as->keep_cs)
+-		cs_deactivate(as, msg->spi);
+-
+ 	atmel_spi_unlock(as);
+ 
+ 	msg->status = as->done_status;

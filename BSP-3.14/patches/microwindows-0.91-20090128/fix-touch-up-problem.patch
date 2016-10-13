@@ -1,0 +1,62 @@
+Index: microwindows-0.91-20090128/src/engine/devmouse.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devmouse.c
++++ microwindows-0.91-20090128/src/engine/devmouse.c
+@@ -36,7 +36,6 @@ static MWCOORD	maxy;		/* maximum allowed
+ static int	scale;		/* acceleration scale factor */
+ static int	thresh;		/* acceleration threshhold */
+ static int	buttons;	/* current state of buttons */
+-static MWBOOL	changed;	/* mouse state has changed */
+ 
+ static MWCOORD 	curminx;	/* minimum x value of cursor */
+ static MWCOORD 	curminy;	/* minimum y value of cursor */
+@@ -83,7 +82,6 @@ GdOpenMouse(void)
+ 	miny = MIN_MWCOORD;
+ 	maxx = MAX_MWCOORD;
+ 	maxy = MAX_MWCOORD;
+-	changed = TRUE;
+ 
+ 	/* init cursor position and size info*/
+ 	curvisible = 0;
+@@ -199,8 +197,6 @@ GdMoveMouse(MWCOORD newx, MWCOORD newy)
+ 	if (newx == xpos && newy == ypos)
+ 		return;
+ 
+-	changed = TRUE;
+-
+ 	xpos = newx;
+ 	ypos = newy;
+ }
+@@ -236,11 +232,6 @@ GdReadMouse(MWCOORD *px, MWCOORD *py, in
+ 
+ //	printf("x=%3d y=%3d ... ", xpos, ypos);
+ 
+-	if (changed) {
+-		changed = FALSE;
+-		return 1;
+-	}
+-
+ 	/* read the mouse position */
+ 	status = mousedev.Read(&x, &y, &z, &newbuttons);
+ 	if (status < 0)
+@@ -286,7 +277,6 @@ GdReadMouse(MWCOORD *px, MWCOORD *py, in
+ 	 * several times before we get valid data.
+ 	 */
+ 	if (buttons != newbuttons) {
+-		changed = TRUE;
+ 		buttons = newbuttons;
+ 	}
+ 
+@@ -296,12 +286,7 @@ GdReadMouse(MWCOORD *px, MWCOORD *py, in
+ 	if (status != 3)
+ 		GdMoveMouse(dx, dy);
+ 
+-	/* anything change? */
+-	if (!changed)
+-		return 0;
+-
+ 	/* report new mouse data */
+-	changed = FALSE;
+ 	*px = xpos;
+ 	*py = ypos;
+ 	*pb = buttons;

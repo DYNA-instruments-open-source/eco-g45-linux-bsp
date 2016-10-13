@@ -1,0 +1,8 @@
+## SECTION=fixme
+
+config QT4_GUF_DBUS
+bool
+select QT4
+prompt "Garz & Fricke Qt4 DBUS demo application"
+help
+  Garz & Fricke Qt4 DBUS demo application.

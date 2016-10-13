@@ -1,0 +1,25 @@
+Index: linux-2.6.33/arch/arm/mach-mx3/clock-imx35.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/clock-imx35.c
++++ linux-2.6.33/arch/arm/mach-mx3/clock-imx35.c
+@@ -290,15 +290,14 @@ static unsigned long get_rate_ipg_per(st
+ {
+ 	unsigned long pdr0 = __raw_readl(CCM_BASE + CCM_PDR0);
+ 	unsigned long pdr4 = __raw_readl(CCM_BASE + CCM_PDR4);
+-	unsigned long div1, div2;
++	unsigned long div;
+ 
+ 	if (pdr0 & (1 << 26)) {
+-		div1 = (pdr4 >> 19) & 0x7;
+-		div2 = (pdr4 >> 16) & 0x7;
+-		return get_rate_arm() / ((div1 + 1) * (div2 + 1));
++		div = (pdr4 >> 16) & 0x3f;
++		return get_rate_arm() / (div + 1);
+ 	} else {
+-		div1 = (pdr0 >> 12) & 0x7;
+-		return get_rate_ahb(NULL) / div1;
++		div = (pdr0 >> 12) & 0x7;
++		return get_rate_ahb(NULL) / (div + 1);
+ 	}
+ }
+ 

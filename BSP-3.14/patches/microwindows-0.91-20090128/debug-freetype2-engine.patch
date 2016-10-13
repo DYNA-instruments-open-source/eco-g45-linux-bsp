@@ -1,0 +1,197 @@
+Index: microwindows-0.91-20090128/src/engine/font_freetype2.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/font_freetype2.c
++++ microwindows-0.91-20090128/src/engine/font_freetype2.c
+@@ -61,7 +61,7 @@ extern MWBOOL gr_usebg;
+  *
+  * FIXME: This option should be in the config file.
+  */
+-#define HAVE_FREETYPE_2_CACHE 1
++#define HAVE_FREETYPE_2_CACHE 0
+ 
+ 
+ /*
+@@ -340,12 +340,15 @@ freetype2_face_requester(FTC_FaceID face
+ 		char * filename = fontdata->data.filename;
+ 		/* DPRINTF("Loading font from file '%s' @ freetype2_face_requester\n", 
+ 		   filename); */
++		printf("Loading font from file '%s' @ freetype2_face_requester\n", 
++		   filename);
+ 		assert(filename);
+ 		return FT_New_Face(library, filename, 0, aface);
+ 	}
+ }
+ #endif
+ 
++#define LOOKUP_CHAR(pf_,face_,ch_) (FT_Get_Char_Index((face_), (ch_)))
+ 
+ /**
+  * Initialize the FreeType 2 driver.  If successful, this is a one-time
+@@ -391,7 +394,7 @@ freetype2_init(PSD psd)
+ 		freetype2_library = NULL;
+ 		return 0;
+ 	}
+-
++printf("Cache manager initialized\n");
+ 	err = FTC_SBitCache_New(freetype2_cache_manager,
+ 				&freetype2_cache_sbit);
+ 	if (err != FT_Err_Ok) {
+@@ -446,6 +449,8 @@ freetype2_createfont(const char *name, M
+ 	int first_time = 0;
+ #endif
+ 
++	printf("0: Fontanme: %s\n", name);
++
+ 	/* Initialization */
+ 	if (freetype2_library == NULL) {
+ 		/* Init freetype library */
+@@ -464,14 +469,19 @@ freetype2_createfont(const char *name, M
+ 	} else {
+ 		strcpy(fontname, freetype2_font_dir);
+ 		strcat(fontname, "/");
+-		strcat(fontname, name);
++		//strcat(fontname, name);
++		strcat(fontname, "tahoma");
+ 	}
+ 
++	printf("1: Fontanme: %s\n", fontname);
+ 	/* check for extension */
+ 	if ((p = strrchr(fontname, '.')) == NULL ||
+ 	    ((strcmpi(p, ".ttf") != 0) && (strcmpi(p, ".pfr") != 0))) {
+ 		strcat(fontname, ".ttf");
+ 	}
++	printf("2: Fontanme: %s\n", fontname);
++
++
+ #if HAVE_FREETYPE_2_CACHE
+ 	faceid = freetype2_fonts;
+ 	while ( (faceid != NULL) && (0 != strcmpi(faceid->data.filename, fontname)) )
+@@ -480,7 +490,7 @@ freetype2_createfont(const char *name, M
+ 	}
+ 	if (faceid == NULL) {
+ 		/* Not found in list, so add it. */
+-		DPRINTF("Nano-X-Freetype2: Adding new font: %s\n", fontname);
++		printf("Nano-X-Freetype2: Adding new font: %s\n", fontname);
+ 		faceid = (freetype2_fontdata *) calloc(sizeof(*faceid), 1);
+ 		if (faceid == NULL) {
+ 			free(fontname);
+@@ -501,6 +511,8 @@ freetype2_createfont(const char *name, M
+ 		free(fontname);
+ 	}
+ 	fontname = faceid->data.filename;
++	printf("3: Fontanme: %s\n", fontname);
++
+ #else
+ 	faceid = NULL;
+ #endif
+@@ -605,6 +617,7 @@ freetype2_createfont_internal(freetype2_
+ #endif
+ 	FT_Error error;
+ 
++	printf("Now in %s\n", __FILE__);
+ 	/* allocate font structure */
+ 	pf = (PMWFREETYPE2FONT) calloc(sizeof(MWFREETYPE2FONT), 1);
+ 	if (!pf) {
+@@ -629,6 +642,8 @@ freetype2_createfont_internal(freetype2_
+ 	pf->cmapdesc.u.encoding = ft_encoding_unicode;
+ #endif
+ #else
++	printf("Loading Face with file %s\n", filename);
++
+ 	/* Load face */
+ 	if (filename) {
+ 		error = FT_New_Face(freetype2_library, filename, 0, &pf->face);
+@@ -638,14 +653,15 @@ freetype2_createfont_internal(freetype2_
+ 			goto out;
+ 		}
+ 		/*DPRINTF("Nano-X-Freetype2: Loading font from file \"%s\"\n", filename); */
++		printf("%s: Loading Face successfully\n", __FILE__);
+ 	} else {
+-		error = FT_New_Memory_Face(freetype2_library,
+-		    buffer, length, 0, &pf->face);
+-		if (error != FT_Err_Ok) {
+-			EPRINTF("Nano-X-Freetype2: Can't load font from memory - %lx\n",
+-			    (unsigned long) error);
++//		error = FT_New_Memory_Face(freetype2_library,
++//		    buffer, length, 0, &pf->face);
++//		if (error != FT_Err_Ok) {
++//			EPRINTF("Nano-X-Freetype2: Can't load font from memory - %lx\n",
++//			    (unsigned long) error);
+ 			goto out;
+-		}
++//		}
+ 		/*DPRINTF("Nano-X-Freetype2: Loading font from memory\n"); */
+ 	}
+ 
+@@ -664,6 +680,22 @@ freetype2_createfont_internal(freetype2_
+ #if HAVE_FREETYPE_2_CACHE
+ 	/* Check that the font file exists and is valid */
+ 	/*DPRINTF("freetype2_createfont_internal(): testing\n");*/
++
++	if(!freetype2_cache_manager)
++		printf("No cache manager available\n");
++	if(! &(pf->imagedesc.font))
++		printf("No font available\n");
++	else
++	{
++		if(!pf->imagedesc.font.face_id)
++			printf("No face_id available\n");
++		printf("pix_width: %d\n", pf->imagedesc.font.pix_width);
++		printf("pix_height: %d\n", pf->imagedesc.font.pix_height);
++	}
++
++	pf->imagedesc.font.pix_width = 12;
++	pf->imagedesc.font.pix_height = 8;
++
+ 	error = FTC_Manager_Lookup_Size(freetype2_cache_manager,
+ 	    &(pf->imagedesc.font), &face, &size);
+ 	if (error != FT_Err_Ok) {
+Index: microwindows-0.91-20090128/src/engine/devfont.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devfont.c
++++ microwindows-0.91-20090128/src/engine/devfont.c
+@@ -100,27 +100,34 @@ GdCreateFont(PSD psd, const char *name,
+ 		if (!name || !name[0])
+ 			name = pf->name;
+ 		fontname = name;
++		printf("a: Fontname: %s\n", fontname);
+ 		fontclass = MWLF_CLASS_ANY;
+ 	} else {
+ 		/* otherwise, use MWLOGFONT name, height and class*/
+ #if FONTMAPPER
+ 		fontname = NULL; /* Paranoia */
+  		fontclass = select_font(plogfont, &fontname);
++		printf("b: Fontname: %s\n", fontname);
+ #else
+ 		/* Copy the name from plogfont->lfFaceName to fontmapper_fontname
+ 		 * Note that it may not be NUL terminated in the source string,
+ 		 * so we're careful to NUL terminate it here.
+ 		 */
+-		strncpy(fontmapper_fontname, plogfont->lfFaceName, MWLF_FACESIZE);
++		//strncpy(fontmapper_fontname, plogfont->lfFaceName, MWLF_FACESIZE);
++		strncpy(fontmapper_fontname, "tahoma", MWLF_FACESIZE);
++		printf("c0: Fontname: %s\n", plogfont->lfFaceName);
+ 		fontmapper_fontname[MWLF_FACESIZE] = '\0';
+ 		fontname = fontmapper_fontname;
+ 		if (!fontname[0])	/* if name not specified, use first builtin*/
+ 			fontname = pf->name;
+ 		fontclass = plogfont->lfClass;
++
++		printf("c: Fontname: %s\n", fontname);
+ #endif
+ 		height = plogfont->lfHeight;
+ 		if (plogfont->lfUnderline)
+ 			fontattr = MWTF_UNDERLINE;
++
+ 	}
+ 	height = abs(height);
+ 
+@@ -130,7 +137,7 @@ GdCreateFont(PSD psd, const char *name,
+  			if(!strcmpi(pf[i].name, fontname)) {
+   				pf[i].fontsize = pf[i].cfont->height;
+ 				pf[i].fontattr = fontattr;
+-DPRINTF("createfont: (height == 0) found builtin font %s (%d)\n", fontname, i);
++printf("createfont: (height == 0) found builtin font %s (%d)\n", fontname, i);
+   				return (PMWFONT)&pf[i];
+   			}
+   		}

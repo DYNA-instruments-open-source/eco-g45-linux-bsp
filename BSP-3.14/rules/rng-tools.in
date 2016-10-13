@@ -1,0 +1,7 @@
+## SECTION=shell_and_console
+
+config RNG_TOOLS
+	tristate
+	prompt "rng-tools"
+	help
+	  FIXME

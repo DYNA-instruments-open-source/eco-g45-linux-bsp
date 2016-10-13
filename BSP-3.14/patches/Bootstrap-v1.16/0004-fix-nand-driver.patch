@@ -1,0 +1,17 @@
+Index: Bootstrap-v1.16/include/nandflash.h
+===================================================================
+--- Bootstrap-v1.16.orig/include/nandflash.h
++++ Bootstrap-v1.16/include/nandflash.h
+@@ -79,10 +79,10 @@ typedef struct _NandInfo
+ 
+ #ifdef NANDFLASH_SMALL_BLOCKS
+ #define BAD_BLOCK_INFO_OFFSET 5
+-#define SPARE_DATA_SIZE      64
++#define SPARE_DATA_SIZE      16
+ #else
+ #define BAD_BLOCK_INFO_OFFSET 0
+-#define SPARE_DATA_SIZE      16
++#define SPARE_DATA_SIZE      64
+ #endif
+ 
+ #define BAD_BLOCK_TAG   0xFF

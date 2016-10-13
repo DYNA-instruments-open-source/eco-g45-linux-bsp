@@ -1,0 +1,89 @@
+From 81a0cf8b656ac615f98f78b7d38c522728000229 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Thu, 17 Dec 2009 11:56:43 +0100
+Subject: [PATCH 21/59] imx: mangle addresses after adding the offset
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+don't use
+
+	IO_ADDRESS($base) + $offset
+
+but
+
+	IO_ADDRESS($base + $offset)
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Cc: Sascha Hauer <kernel@pengutronix.de>
+Cc: Russell King <linux@arm.linux.org.uk>
+Cc: Holger Schurig <hs4233@mail.mn-solutions.de>
+Cc: Rabin Vincent <rabin@rab.in>
+Cc: "Agustín Ferrín Pozuelo" <gatoguan-os@yahoo.com>
+Cc: Javier Martin <javier.martin@vista-silicon.com>
+Cc: Valentin Longchamp <valentin.longchamp@epfl.ch>
+Cc: Daniel Mack <daniel@caiaq.de>
+Cc: Dmitriy Taychenachev <dimichxp@gmail.com>
+---
+ arch/arm/mach-mx2/clock_imx21.c      |    2 +-
+ arch/arm/mach-mx2/clock_imx27.c      |    2 +-
+ arch/arm/mach-mx3/cpu.c              |    2 +-
+ arch/arm/plat-mxc/include/mach/mxc.h |    6 +++---
+ 4 files changed, 6 insertions(+), 6 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx2/clock_imx21.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/clock_imx21.c
++++ linux-2.6.33/arch/arm/mach-mx2/clock_imx21.c
+@@ -28,7 +28,7 @@
+ #include <asm/clkdev.h>
+ #include <asm/div64.h>
+ 
+-#define IO_ADDR_CCM(off)	(MX21_IO_ADDRESS(MX21_CCM_BASE_ADDR) + (off))
++#define IO_ADDR_CCM(off)	(MX21_IO_ADDRESS(MX21_CCM_BASE_ADDR + (off)))
+ 
+ /* Register offsets */
+ #define CCM_CSCR		IO_ADDR_CCM(0x0)
+Index: linux-2.6.33/arch/arm/mach-mx2/clock_imx27.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/clock_imx27.c
++++ linux-2.6.33/arch/arm/mach-mx2/clock_imx27.c
+@@ -29,7 +29,7 @@
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+ 
+-#define IO_ADDR_CCM(off)	(MX27_IO_ADDRESS(MX27_CCM_BASE_ADDR) + (off))
++#define IO_ADDR_CCM(off)	(MX27_IO_ADDRESS(MX27_CCM_BASE_ADDR + (off)))
+ 
+ /* Register offsets */
+ #define CCM_CSCR		IO_ADDR_CCM(0x0)
+Index: linux-2.6.33/arch/arm/mach-mx3/cpu.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/cpu.c
++++ linux-2.6.33/arch/arm/mach-mx3/cpu.c
+@@ -41,7 +41,7 @@ void __init mx31_read_cpu_rev(void)
+ 	u32 i, srev;
+ 
+ 	/* read SREV register from IIM module */
+-	srev = __raw_readl(IO_ADDRESS(IIM_BASE_ADDR) + MXC_IIMSREV);
++	srev = __raw_readl(IO_ADDRESS(IIM_BASE_ADDR + MXC_IIMSREV));
+ 
+ 	for (i = 0; i < ARRAY_SIZE(mx31_cpu_type); i++)
+ 		if (srev == mx31_cpu_type[i].srev) {
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mxc.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mxc.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -121,9 +121,9 @@ extern unsigned int __mxc_cpu_type;
+ #endif
+ 
+ #if defined(CONFIG_ARCH_MX3) || defined(CONFIG_ARCH_MX2)
+-#define CSCR_U(n) (IO_ADDRESS(WEIM_BASE_ADDR) + n * 0x10)
+-#define CSCR_L(n) (IO_ADDRESS(WEIM_BASE_ADDR) + n * 0x10 + 0x4)
+-#define CSCR_A(n) (IO_ADDRESS(WEIM_BASE_ADDR) + n * 0x10 + 0x8)
++#define CSCR_U(n) (IO_ADDRESS(WEIM_BASE_ADDR + n * 0x10))
++#define CSCR_L(n) (IO_ADDRESS(WEIM_BASE_ADDR + n * 0x10 + 0x4))
++#define CSCR_A(n) (IO_ADDRESS(WEIM_BASE_ADDR + n * 0x10 + 0x8))
+ #endif
+ 
+ #define cpu_is_mx3()	(cpu_is_mx31() || cpu_is_mx35() || cpu_is_mxc91231())

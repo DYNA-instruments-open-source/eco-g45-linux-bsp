@@ -1,0 +1,98 @@
+Index: microwindows-0.91-20090128/src/mwin/winevent.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/winevent.c
++++ microwindows-0.91-20090128/src/mwin/winevent.c
+@@ -13,6 +13,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ 
++#if 0
+ #if !(DOS_TURBOC | DOS_QUICKC | _MINIX | VXWORKS)
+ static int
+ abs(int n)
+@@ -20,6 +21,7 @@ abs(int n)
+ 	return n >= 0? n: -n;
+ }
+ #endif
++#endif
+ 
+ /*
+  * Update mouse status and issue events on it if necessary.
+Index: microwindows-0.91-20090128/src/Makefile.rules
+===================================================================
+--- microwindows-0.91-20090128.orig/src/Makefile.rules
++++ microwindows-0.91-20090128/src/Makefile.rules
+@@ -16,16 +16,14 @@ endif
+ 
+ # install directories for headers and libraries
+ INSTALL_PREFIX  = /
+-INSTALL_OWNER1  = -o root -g root
+-INSTALL_OWNER2  = -o root -g bin
+-HDRINSTALLDIR = $(INSTALL_PREFIX)/include/microwin
+-LIBINSTALLDIR = $(INSTALL_PREFIX)/lib
+-BININSTALLDIR = $(INSTALL_PREFIX)/bin
+-
+-INSTALL_DIR   = install -c -m 755 $(INSTALL_OWNER1) -d
+-INSTALL_HDR   = install -c -m 644 $(INSTALL_OWNER2)
+-INSTALL_LIB   = install -c -m 644 $(INSTALL_OWNER2)
+-INSTALL_BIN   = install -c -m 755 $(INSTALL_OWNER2)
++HDRINSTALLDIR = $(INSTALL_PREFIX)/usr/include/microwin
++LIBINSTALLDIR = $(INSTALL_PREFIX)/usr/lib
++BININSTALLDIR = $(INSTALL_PREFIX)/usr/bin
++
++INSTALL_DIR   = install -c -m 755  -d
++INSTALL_HDR   = install -c -m 644
++INSTALL_LIB   = install -c -m 644
++INSTALL_BIN   = install -c -m 755
+ 
+ TSLIB_DIR	= .
+ 
+@@ -322,15 +320,15 @@ endif
+ ifneq ($(ARCH), LINUX-TCC)
+ ifneq ($(ARCH), DJGPP)
+ ifeq ($(ARCH), ELKS)
+-CFLAGS += -O
++CFLAGS += -O3
+ else
+ ifeq ($(FRAMEBUFFER), Y)
+ ifeq ($(FBVGA), Y)
+-CFLAGS += -O
++CFLAGS += -O3
+ endif
+ endif # FRAMEBUFER
+ ifeq ($(HWVGA), Y)
+-CFLAGS += -O
++CFLAGS += -O3
+ endif
+ endif # !ELKS
+ endif # !DJGPP
+@@ -347,15 +345,15 @@ OPTFLAGS += -O3
+ endif
+ 
+ ifeq ($(GPROF), Y)
+-OPTFLAGS += -pg
+-LDFLAGS += -pg
++OPTFLAGS +=
++LDFLAGS +=
+ endif
+ 
+ endif
+ 
+ ifeq ($(DEBUG), Y)
+-OPTFLAGS += -ggdb
+-DEFINES += -DDEBUG=1
++OPTFLAGS +=
++DEFINES +=
+ else
+ #OPTFLAGS += -DNDEBUG
+ endif
+@@ -720,6 +718,9 @@ install: default
+ ifeq ($(SHAREDLIBS), Y)
+ 	$(INSTALL_LIB) $(MW_DIR_LIB)/*.so $(LIBINSTALLDIR)
+ endif
++	echo "Copying binaries to $(BININSTALLDIR)"
++	$(INSTALL_DIR) $(BININSTALLDIR)
++	$(INSTALL_BIN) $(MW_DIR_BIN)/* $(BININSTALLDIR)
+ ifeq ($(NANOX), Y)
+ ifeq ($(LINK_APP_INTO_SERVER), N)
+ 	echo "Copying binaries to $(BININSTALLDIR)"

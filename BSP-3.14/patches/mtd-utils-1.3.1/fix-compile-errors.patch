@@ -1,0 +1,36 @@
+Index: mtd-utils-1.3.1/ubi-utils/old-utils/src/error.c
+===================================================================
+--- mtd-utils-1.3.1.orig/ubi-utils/old-utils/src/error.c
++++ mtd-utils-1.3.1/ubi-utils/old-utils/src/error.c
+@@ -74,13 +74,11 @@ info_msg(const char *fmt, ...)
+ 	FILE* fpout;
+ 	char buf[MAXLINE + 1];
+ 	va_list	ap;
+-	int n;
+ 
+ 	fpout = stdout;
+ 
+ 	va_start(ap, fmt);
+ 	vsnprintf(buf, MAXLINE, fmt, ap);
+-	n = strlen(buf);
+ 	strcat(buf, "\n");
+ 
+ 	fputs(buf, fpout);
+Index: mtd-utils-1.3.1/ubi-utils/old-utils/src/pfi2bin.c
+===================================================================
+--- mtd-utils-1.3.1.orig/ubi-utils/old-utils/src/pfi2bin.c
++++ mtd-utils-1.3.1/ubi-utils/old-utils/src/pfi2bin.c
+@@ -319,12 +319,11 @@ static FILE*
+ my_fmemopen (void *buf, size_t size, const char *opentype)
+ {
+     FILE* f;
+-    size_t ret;
+ 
+     assert(strcmp(opentype, "r") == 0);
+ 
+     f = tmpfile();
+-    ret = fwrite(buf, 1, size, f);
++    fwrite(buf, 1, size, f);
+     rewind(f);
+ 
+     return f;

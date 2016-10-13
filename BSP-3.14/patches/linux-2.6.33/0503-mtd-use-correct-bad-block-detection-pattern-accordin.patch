@@ -1,0 +1,50 @@
+From 17b8fe781c955c17381b5b449709ac43c60a78e6 Mon Sep 17 00:00:00 2001
+From: Juergen Beisert <jbe@pengutronix.de>
+Date: Thu, 11 Mar 2010 17:26:02 +0100
+Subject: [PATCH 56/59] mtd: use correct bad block detection pattern according to manufacturer's datasheets
+
+The MTD framework decides to use one or two byte bad block markers based
+of the pagesize. But manufacturers are marking their bad blocks based on the
+data bus width instead.
+
+This patch forces the usage of one byte bad block markers, as this platform
+uses 8 bit NAND devices only.
+
+Signed-off-by: Juergen Beisert <jbe@pengutronix.de>
+---
+ drivers/mtd/nand/mxc_nand.c |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+
+Index: linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/nand/mxc_nand.c
++++ linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+@@ -744,6 +744,18 @@ static struct nand_bbt_descr bbt_mirror_
+ 	.pattern = mirror_pattern,
+ };
+ 
++/*
++ * We are using a NAND device with an 8 bit databus. So, we expect the
++ * bad block marker at offset 5 in the OOB, with 8 bit width only
++ */
++static uint8_t scan_ff_pattern = 0xff;
++static struct nand_bbt_descr largepage_memorybased_8bit = {
++	.options = NAND_BBT_SCAN2NDPAGE, /* Search good / bad pattern on the first and the second page of each block */
++	.offs = 5,	/* manufactures decision */
++	.len = 1,
++	.pattern = &scan_ff_pattern
++};
++
+ static int __init mxcnd_probe(struct platform_device *pdev)
+ {
+ 	struct nand_chip *this;
+@@ -903,6 +915,9 @@ static int __init mxcnd_probe(struct pla
+ 	if (mtd->writesize == 2048)
+ 		this->ecc.layout = oob_largepage;
+ 
++	/* force our own bad block pattern here */
++	this->badblock_pattern = &largepage_memorybased_8bit;
++
+ 	/* second phase scan */
+ 	if (nand_scan_tail(mtd)) {
+ 		err = -ENXIO;

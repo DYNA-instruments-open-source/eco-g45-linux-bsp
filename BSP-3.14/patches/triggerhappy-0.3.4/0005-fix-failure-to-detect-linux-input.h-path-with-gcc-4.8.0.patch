@@ -1,0 +1,30 @@
+https://github.com/wertarbyte/triggerhappy/issues/3
+
+Failure to detect linux/input.h path with gcc 4.8.0
+
+As of gcc 4.8.0 this has stopped working on my system,
+because it doesn't detect linux/input.h properly and
+then silently fails to get any event codes.
+
+The first line of gcc -M -E output now is:
+-: /usr/include/stdc-predef.h /usr/include/linux/input.h \
+so it ends up looking at stdc-predef.h.
+
+From: abrasive (James Laird) ; https://github.com/abrasive
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+Index: b/Makefile
+===================================================================
+--- a/Makefile
++++ b/Makefile
+@@ -10,7 +10,7 @@
+
+ MAKEDEPEND = $(CC) -M -MG $(CPPFLAGS) -o $*.d $<
+
+-LINUX_INPUT_H := $(shell echo '\#include <linux/input.h>' | $(CC) $(CPPFLAGS) -M -E - | awk 'NR==1 {print $$2}')
++LINUX_INPUT_H := $(shell echo '\#include <linux/input.h>' | $(CC) $(CPPFLAGS) -M -E - | awk 'NR==1 {print $$1=="-:" ? $$3 : $$2}')
+
+ all: thd th-cmd man
+

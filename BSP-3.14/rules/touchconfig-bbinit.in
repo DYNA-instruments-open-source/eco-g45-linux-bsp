@@ -1,0 +1,7 @@
+## SECTION=initmethod_bbinit
+
+config TOUCHCONFIG_BBINIT_LINK
+	string
+	depends on TOUCHCONFIG_STARTSCRIPT
+	prompt "touchconfig"
+	default "S24touchconfig"

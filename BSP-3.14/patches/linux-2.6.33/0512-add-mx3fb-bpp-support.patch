@@ -1,0 +1,35 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mx3fb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+@@ -33,6 +33,7 @@ struct mx3fb_platform_data {
+ 	const char			*name;
+ 	const struct fb_videomode	*mode;
+ 	int				num_modes;
++	unsigned long			bpp;
+ };
+ 
+ #endif
+Index: linux-2.6.33/drivers/video/mx3fb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/mx3fb.c
++++ linux-2.6.33/drivers/video/mx3fb.c
+@@ -1442,6 +1442,7 @@ static void release_fbi(struct fb_info *
+ static int mx3fb_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
++	struct mx3fb_platform_data *mx3fb_pdata;
+ 	int ret;
+ 	struct resource *sdc_reg;
+ 	struct mx3fb_data *mx3fb;
+@@ -1496,6 +1497,10 @@ static int mx3fb_probe(struct platform_d
+ 	if (ret < 0)
+ 		goto eisdc0;
+ 
++	mx3fb_pdata = mx3fb->dev->platform_data;
++	if(mx3fb_pdata->bpp)
++		default_bpp = mx3fb_pdata->bpp;
++
+ 	return 0;
+ 
+ eisdc0:

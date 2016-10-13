@@ -1,0 +1,61 @@
+Index: linux-2.6.33/include/linux/ucb1400.h
+===================================================================
+--- linux-2.6.33.orig/include/linux/ucb1400.h
++++ linux-2.6.33/include/linux/ucb1400.h
+@@ -112,6 +112,7 @@ struct ucb1400 {
+ 
+ struct ucb1400_pdata {
+ 	int	irq;
++	bool enable_ts;
+ };
+ 
+ static inline u16 ucb1400_reg_read(struct snd_ac97 *ac97, u16 reg)
+Index: linux-2.6.33/drivers/mfd/ucb1400_core.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mfd/ucb1400_core.c
++++ linux-2.6.33/drivers/mfd/ucb1400_core.c
+@@ -88,25 +88,28 @@ static int ucb1400_core_probe(struct dev
+ 		goto err1;
+ 
+ 	/* TOUCHSCREEN */
+-	ucb_ts.ac97 = ac97;
++	if (pdata->enable_ts)
++	{
++		ucb_ts.ac97 = ac97;
+ 
+-	if (pdata != NULL && pdata->irq >= 0)
+-		ucb_ts.irq = pdata->irq;
+-	else
+-		ucb_ts.irq = -1;
++		if (pdata != NULL && pdata->irq >= 0)
++			ucb_ts.irq = pdata->irq;
++		else
++			ucb_ts.irq = -1;
+ 
+-	ucb->ucb1400_ts = platform_device_alloc("ucb1400_ts", -1);
+-	if (!ucb->ucb1400_ts) {
+-		err = -ENOMEM;
+-		goto err2;
++		ucb->ucb1400_ts = platform_device_alloc("ucb1400_ts", -1);
++		if (!ucb->ucb1400_ts) {
++			err = -ENOMEM;
++			goto err2;
++		}
++		err = platform_device_add_data(ucb->ucb1400_ts, &ucb_ts,
++						sizeof(ucb_ts));
++		if (err)
++			goto err3;
++		err = platform_device_add(ucb->ucb1400_ts);
++		if (err)
++			goto err3;
+ 	}
+-	err = platform_device_add_data(ucb->ucb1400_ts, &ucb_ts,
+-					sizeof(ucb_ts));
+-	if (err)
+-		goto err3;
+-	err = platform_device_add(ucb->ucb1400_ts);
+-	if (err)
+-		goto err3;
+ 
+ 	return 0;
+ 

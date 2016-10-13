@@ -1,0 +1,13 @@
+Index: microwindows-0.91-20090128/src/engine/devmouse.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/engine/devmouse.c
++++ microwindows-0.91-20090128/src/engine/devmouse.c
+@@ -633,7 +633,7 @@ filter_absrotate(int state, int *xpos, i
+ 		break;
+ 
+ 	case MWPORTRAIT_DOWN:
+-		*xpos = x;
++		*xpos = scrdev.xres - x - 1;
+ 		*ypos = scrdev.yres - y - 1;
+ 		break;
+ 

@@ -1,0 +1,17 @@
+Index: linux-2.6.33/drivers/video/mx3fb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/mx3fb.c
++++ linux-2.6.33/drivers/video/mx3fb.c
+@@ -773,10 +773,10 @@ static int __set_par(struct fb_info *fbi
+ 			mode = IPU_PANEL_SHARP_TFT;
+ 
+ 		dev_dbg(fbi->device, "pixclock = %ul Hz\n",
+-			(u32) (PICOS2KHZ(fbi->var.pixclock) * 1000UL));
++			fbi->var.pixclock * 1000UL);
+ 
+ 		if (sdc_init_panel(mx3fb, mode,
+-				   (PICOS2KHZ(fbi->var.pixclock)) * 1000UL,
++				   fbi->var.pixclock * 1000UL,
+ 				   fbi->var.xres, fbi->var.yres,
+ 				   (fbi->var.sync & FB_SYNC_SWAP_RGB) ?
+ 				   IPU_PIX_FMT_BGR666 : IPU_PIX_FMT_RGB666,

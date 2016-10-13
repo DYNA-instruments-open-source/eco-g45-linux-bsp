@@ -1,0 +1,267 @@
+diff --git a/src/Makefile.rules b/src/Makefile.rules
+index a2ca6b0..64ae296 100644
+--- a/src/Makefile.rules
++++ b/src/Makefile.rules
+@@ -27,6 +27,8 @@ INSTALL_HDR   = install -c -m 644 $(INSTALL_OWNER2)
+ INSTALL_LIB   = install -c -m 644 $(INSTALL_OWNER2)
+ INSTALL_BIN   = install -c -m 755 $(INSTALL_OWNER2)
+ 
++TSLIB_DIR	= .
++
+ ##############################################################################
+ # Defines, includes, and core libraries.  Controlled by the config file.
+ ##############################################################################
+@@ -244,6 +246,11 @@ ifeq ($(FBVGA), Y)
+ DEFINES += -DFBVGA=1
+ endif
+ 
++ifeq ($(TSLIBMOUSE), Y)
++DEFINES += -I$(TSLIB_DIR)/include
++LDFLAGS += -L$(TSLIB_DIR)/lib/ -lts
++endif
++
+ ifeq ($(INVERT4BPP), Y)
+ DEFINES += -DINVERT4BPP=1
+ endif
+diff --git a/src/drivers/Objects.rules b/src/drivers/Objects.rules
+index 368bfa6..f68f874 100644
+--- a/src/drivers/Objects.rules
++++ b/src/drivers/Objects.rules
+@@ -166,6 +166,11 @@ CFLAGS += -DTOUCHSCREEN_ADS7846=1
+ MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_touchscreen.o
+ endif
+ 
++ifeq ($(TSLIBMOUSE), Y)
++CFLAGS += -DTOUCHSCREEN_TSLIB=1
++MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_tslib.o
++endif
++
+ ifeq ($(IPAQMOUSE), Y)
+ CFLAGS += -DTOUCHSCREEN_IPAQ=1
+ MW_CORE_OBJS += $(MW_DIR_OBJ)/drivers/mou_touchscreen.o
+diff --git a/src/drivers/mou_touchscreen.c b/src/drivers/mou_touchscreen.c
+index 065ffc4..654ad08 100644
+--- a/src/drivers/mou_touchscreen.c
++++ b/src/drivers/mou_touchscreen.c
+@@ -11,6 +11,8 @@
+    TOUCHSCREEN_TUXSCREEN - Shannon IS2630
+    TOUCHSCREEN_ADS - Applied Data Systems Graphics Client+ devices
+    TOUCHSCREEN_ADS7846 - TI ADS6847 (PSI OMAP Innovator)
++   TOUCHSCREEN_TSLIB
++
+ */
+ 
+ /* To add a new device, add a new item to the config file
+@@ -41,6 +43,12 @@
+ #include "touchscreen_ads7846.h"
+ #endif
+ 
++#ifdef TOUCHSCREEN_TSLIB
++#include "touchscreen_tslib.h"
++#endif
++// FIXME
++#include "touchscreen_tslib.h"
++
+ /* The tuxscreen just uses the generic ucb1x00 driver */
+ #ifdef TOUCHSCREEN_TUXSCREEN
+ #include "touchscreen_ucb1x00.h"
+@@ -50,29 +58,47 @@
+ #error "You didn't define a device for the generic touchscreen driver!"
+ #endif
+ 
++#ifdef TOUCHSCREEN_TSLIB
++#include "tslib.h"
++static struct tsdev *pd_fd;
++#else
+ static int pd_fd = -1;
++#endif
++
+ extern SCREENDEVICE scrdev;
+ 
+ static int PD_Open(MOUSEDEVICE *pmd)
+ {	       
++#ifdef TOUCHSCREEN_TSLIB
++	if((pd_fd = ts_open(TS_DEVICE_FILE, 0) == NULL) {
++		EPRINTF("Error %d opening %s touchscreen device [%s]\n", 
++			errno, TS_DEVICE, TS_DEVICE_FILE);
++		return -1;
++	}
++#else
+ 	if((pd_fd = open(TS_DEVICE_FILE, O_NONBLOCK)) < 0) {
+ 		EPRINTF("Error %d opening %s touchscreen device [%s]\n", 
+ 			errno, TS_DEVICE, TS_DEVICE_FILE);
+ 		return -1;
+ 	}
++#endif
+ 
+ 	GdHideCursor(&scrdev);  
+-	return pd_fd;
++	return (int)pd_fd;
+ }
+ 
+ static void PD_Close(void)
+ {
+ 	/* Close the touch panel device. */
+- 
++#ifdef TOUCHSCREEN_TSLIB
++	if(pd_fd < NULL) return;
++	ts_close(pd_fd);
++	pd_fd = NULL;
++#else
+ 	if(pd_fd < 0) return;
+- 
+ 	close(pd_fd);
+ 	pd_fd = -1;
++#endif
+ }
+ 
+ static int PD_GetButtonInfo(void)
+@@ -110,8 +136,11 @@ static int PD_Read(MWCOORD *px, MWCOORD *py, MWCOORD *pz, int *pb, int mode)
+ 	*px = event.x;
+ 	*py = event.y;
+ 
+-#if defined(TOUCHSCREEN_IPAQ) || defined(TOUCHSCREEN_ADS7846)
++#if defined(TOUCHSCREEN_IPAQ) || defined(TOUCHSCREEN_ADS7846) || defined(TOUCHSCREEN_TSLIB)
+ 	*pb = (event.pressure) ? MWBUTTON_L : 0;
++	if(event.pressure > 0) {
++	  EPRINTF("(%04x, %04x)\n", event.x, event.y);
++	}
+ #else
+ 	*pb = (event.pressure > 50) ? MWBUTTON_L : 0;
+ #endif
+diff --git a/src/drivers/mou_tslib.c b/src/drivers/mou_tslib.c
+new file mode 100644
+index 0000000..0d479ad
+--- /dev/null
++++ b/src/drivers/mou_tslib.c
+@@ -0,0 +1,111 @@
++/*
++ * Generic touchscreen driver 
++ *
++ * Copyright (c) 2003, Century Software, Inc.
++ * Written by Jordan Crouse <jordan@cosmicpenguin.net>
++ */
++
++/* The following devices are supported by this driver:
++   TOUCHSCREEN_ZAURUS - Sharp Zaurus S5500 
++   TOUCHSCREEN_IPAQ - Compaq Ipaq 3x00
++   TOUCHSCREEN_TUXSCREEN - Shannon IS2630
++   TOUCHSCREEN_ADS - Applied Data Systems Graphics Client+ devices
++   TOUCHSCREEN_ADS7846 - TI ADS6847 (PSI OMAP Innovator)
++   TOUCHSCREEN_TSLIB   - TI OSK5912 (OMAP5912 Starter Kit)
++
++*/
++
++/* To add a new device, add a new item to the config file
++   (MOUSEZZZ=Y for example), and hack drivers/Makefile
++   to add the define (-DTOUCHSCREEN_ZZZ for example).  Finally,
++   add a new header file to drivers (touchscreen_zzz.h for example)
++*/
++
++#include <stdio.h>
++#include <errno.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <device.h>
++
++#include <tslib.h>
++
++static struct tsdev* pd_fd = NULL;
++extern SCREENDEVICE scrdev;
++
++
++static int PD_Open(MOUSEDEVICE *pmd)
++{	       
++	char *tsdevice=NULL;
++
++	if( (tsdevice = getenv("TSLIB_TSDEVICE")) != NULL ) {
++		pd_fd = ts_open(tsdevice,0);
++	} else {
++		pd_fd = ts_open("/dev/input/event1", 0);
++	}
++
++	if(pd_fd == NULL) {
++		EPRINTF("Error %d opening tslib\n", errno);
++		return -1;
++	}
++
++	if (ts_config(pd_fd)) {
++		EPRINTF("Error %d config tslib\n", errno);
++		return -1;
++	}
++
++	return *((int *)pd_fd);
++}
++
++static void PD_Close(void)
++{
++	/* Close the touch panel device. */
++	if(pd_fd == NULL) return;
++
++	ts_close(pd_fd);
++	pd_fd = NULL;
++}
++
++static int PD_GetButtonInfo(void)
++{
++	/* get "mouse" buttons supported */
++	return MWBUTTON_L;
++}
++
++static void PD_GetDefaultAccel(int *pscale,int *pthresh)
++{
++	*pscale = 3;
++	*pthresh = 5;
++}
++
++static int PD_Read(MWCOORD *px, MWCOORD *py, MWCOORD *pz, int *pb, int mode)
++{
++	struct ts_sample samp;
++	int ret;
++
++	ret = ts_read(pd_fd, &samp, 1);
++	if (ret < 0) {
++		EPRINTF("Error %d reading from TSLIB\n", errno);
++		return -1;
++	}
++	if(ret != 1) {
++		return 0;
++	}
++	*px = samp.x;
++	*py = samp.y;
++	*pb = (samp.pressure) ? MWBUTTON_L : 0;
++	*pz = samp.pressure;
++  
++	if(!*pb)
++		return 3;
++	return 2;
++}
++
++MOUSEDEVICE mousedev = {
++	PD_Open,
++	PD_Close,
++	PD_GetButtonInfo,
++	PD_GetDefaultAccel,
++	PD_Read,
++	NULL,
++	MOUSE_TRANSFORM   /* Input filter flags */
++};
+diff --git a/src/drivers/touchscreen_tslib.h b/src/drivers/touchscreen_tslib.h
+new file mode 100644
+index 0000000..e2562f3
+--- /dev/null
++++ b/src/drivers/touchscreen_tslib.h
+@@ -0,0 +1,13 @@
++#ifndef TS_DEVICE
++#define TS_DEVICE "TSLIB"
++
++#define TS_DEVICE_FILE "/dev/input/event1"
++
++struct ts_event {
++  int x;
++  int y;
++  unsigned int pressure;
++  struct timeval stamp;
++};
++
++#endif

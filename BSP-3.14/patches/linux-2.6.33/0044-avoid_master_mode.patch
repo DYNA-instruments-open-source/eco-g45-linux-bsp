@@ -1,0 +1,42 @@
+From 9f190f09e061c898d24ef13111c9c7d4a70650b9 Mon Sep 17 00:00:00 2001
+From: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Date: Mon, 22 Feb 2010 21:25:03 +0100
+Subject: [PATCH 44/59] avoid_master_mode
+
+commit d08a68bfca5a6464eb9167be0659bf0676f02555
+Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Date:   Mon Jan 11 16:56:19 2010 +0000
+
+    ASoC: i.MX SSI driver does not yet support master mode
+
+    The clocks for the SSI block need handling before this can work.
+
+    Signed-off-by: Mark Brown <broonie@opensource.wolfsonmicro.com>
+---
+ sound/soc/imx/imx-ssi.c |   12 ++++--------
+ 1 files changed, 4 insertions(+), 8 deletions(-)
+
+Index: linux-2.6.33/sound/soc/imx/imx-ssi.c
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/imx-ssi.c
++++ linux-2.6.33/sound/soc/imx/imx-ssi.c
+@@ -158,15 +158,11 @@ static int imx_ssi_set_dai_fmt(struct sn
+ 
+ 	/* DAI clock master masks */
+ 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
+-	case SND_SOC_DAIFMT_CBS_CFS:
+-		strcr |= SSI_STCR_TFDIR | SSI_STCR_TXDIR;
+-		break;
+-	case SND_SOC_DAIFMT_CBM_CFS:
+-		strcr |= SSI_STCR_TFDIR;
+-		break;
+-	case SND_SOC_DAIFMT_CBS_CFM:
+-		strcr |= SSI_STCR_TXDIR;
++	case SND_SOC_DAIFMT_CBM_CFM:
+ 		break;
++	default:
++		/* Master mode not implemented, needs handling of clocks. */
++		return -EINVAL;
+ 	}
+ 
+ 	strcr |= SSI_STCR_TFEN0;

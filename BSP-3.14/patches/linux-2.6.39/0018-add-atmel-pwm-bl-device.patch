@@ -1,0 +1,74 @@
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9g45_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9g45_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9g45_devices.c
+@@ -1226,6 +1226,31 @@ void __init at91_add_device_pwm(u32 mask
+ void __init at91_add_device_pwm(u32 mask) {}
+ #endif
+ 
++/* --------------------------------------------------------------------
++ *  PWM Backlight
++ * -------------------------------------------------------------------- */
++
++#if defined(CONFIG_BACKLIGHT_ATMEL_PWM) || defined(BACKLIGHT_ATMEL_PWM_MODULE)
++static struct atmel_pwm_bl_platform_data pwm_bl_data;
++struct platform_device at91_pwm_bl_device = {
++	.name           = "atmel-pwm-bl",
++	.id             = 0,
++	.dev            = {
++	.platform_data = &pwm_bl_data,
++	},
++};
++
++void __init at91_add_device_pwm_bl(struct atmel_pwm_bl_platform_data *data)
++{
++	if (!data)
++		return;
++
++	pwm_bl_data = *data;
++	platform_device_register(&at91_pwm_bl_device);
++}
++#else
++void __init at91_add_device_pwm_bl(struct atmel_pwm_bl_platform_data *data) {}
++#endif
+ 
+ /* --------------------------------------------------------------------
+  *  SSC -- Synchronous Serial Controller
+Index: linux-2.6.39/arch/arm/mach-at91/include/mach/board.h
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/include/mach/board.h
++++ linux-2.6.39/arch/arm/mach-at91/include/mach/board.h
+@@ -38,6 +38,8 @@
+ #include <linux/spi/spi.h>
+ #include <linux/usb/atmel_usba_udc.h>
+ #include <linux/atmel-mci.h>
++#include <linux/atmel-pwm-bl.h>
++
+ #include <sound/atmel-ac97c.h>
+ #include <linux/serial.h>
+ 
+@@ -175,6 +177,11 @@ extern void __init at91_add_device_seria
+ extern void __init at91_add_device_pwm(u32 mask);
+ 
+ /*
++ * PWM Backlight
++ */
++extern void __init at91_add_device_pwm_bl(struct atmel_pwm_bl_platform_data *data);
++
++/*
+  * SSC -- accessed through ssc_request(id).  Drivers don't bind to SSC
+  * platform devices.  Their SSC ID is part of their configuration data,
+  * along with information about which SSC signals they should use.
+Index: linux-2.6.39/drivers/misc/Kconfig
+===================================================================
+--- linux-2.6.39.orig/drivers/misc/Kconfig
++++ linux-2.6.39/drivers/misc/Kconfig
+@@ -63,7 +63,7 @@ config AD525X_DPOT_SPI
+ 
+ config ATMEL_PWM
+ 	tristate "Atmel AT32/AT91 PWM support"
+-	depends on AVR32 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_AT91CAP9
++	depends on AVR32 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_AT91CAP9 || ARCH_AT91SAM9G45
+ 	help
+ 	  This option enables device driver support for the PWM channels
+ 	  on certain Atmel processors.  Pulse Width Modulation is used for

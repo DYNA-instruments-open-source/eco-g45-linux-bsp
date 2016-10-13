@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# /etc/init.d/rngd
+#
+# $Id$
+#
+
+if [ -f /usr/sbin/rngd ]; then
+	echo "Starting rngd..."
+	/usr/sbin/rngd -r /dev/hwrng
+	exit 0
+fi
+
+echo "No rngd found. Aborting"

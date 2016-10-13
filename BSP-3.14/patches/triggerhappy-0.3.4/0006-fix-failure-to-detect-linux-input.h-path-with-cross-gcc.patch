@@ -1,0 +1,28 @@
+Failure to detect linux/input.h path with cross gcc
+
+At least with gcc 4.8.3 as cross-compiler, gcc -M -E output
+first line does not include anything, but the requested
+linux/input.h is included in the dependency list below.
+
+Instead of parsing through this list, just refer to
+the sysroot, which normally is / when not cross-compiling
+and something matching when cross-compiling.
+
+Signed-off-by: Andreas Pretzsch <apr-DoOW80uwmGKzQB+pC5nmwQ (AT) public (DOT) gmane.org>
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+Index: b/Makefile
+===================================================================
+--- a/Makefile
++++ b/Makefile
+@@ -10,7 +10,7 @@
+
+ MAKEDEPEND = $(CC) -M -MG $(CPPFLAGS) -o $*.d $<
+
+-LINUX_INPUT_H := $(shell echo '\#include <linux/input.h>' | $(CC) $(CPPFLAGS) -M -E - | awk 'NR==1 {print $$1=="-:" ? $$3 : $$2}')
++LINUX_INPUT_H := $(shell $(CC) $(CPPFLAGS) -print-sysroot)/usr/include/linux/input.h
+
+ all: thd th-cmd man
+

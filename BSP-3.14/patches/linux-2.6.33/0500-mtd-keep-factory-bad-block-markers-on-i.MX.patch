@@ -1,0 +1,111 @@
+From d8178bb706032fb783605e869a6e4a5a8b826f76 Mon Sep 17 00:00:00 2001
+From: Juergen Beisert <jbe@pengutronix.de>
+Date: Thu, 11 Mar 2010 17:26:02 +0100
+Subject: [PATCH 57/59] mtd: keep factory bad block markers on i.MX
+
+The NAND controller on i.MX31 has a bug with 2k NAND flash handling,
+which is worked around by this patch.
+
+FIXME: find out which i.MX derivates and which silicon revisions
+actually have this bug.
+
+Signed-off-by: Juergen Beisert <jbe@pengutronix.de>
+---
+ drivers/mtd/nand/mxc_nand.c |   70 +++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 70 insertions(+), 0 deletions(-)
+
+Index: linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/nand/mxc_nand.c
++++ linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+@@ -467,6 +467,69 @@ static void mxc_nand_select_chip(struct
+ }
+ 
+ /*
++ * This function should keep manufacturer's bad block marker even in the case
++ * the first generation NFC is in use. This controller can't handle 2kiB pages
++ * in a correct manner. Instead of it intermixes page data and OOB data.
++ *
++ * First time page read will show the following SRAM memory layout:
++ *
++ * SRAM Offset             Data
++ * -------------- Main buffer area ---------------------------
++ *   0
++ *   .                     [0...511] 512 bytes page data
++ *  511
++ *  512
++ *   .                     [528...1039] 512 bytes page data
++ * 1023
++ * 1024
++ *   .                     [1056...1567] 512 bytes page data
++ * 1535
++ * 1536
++ *   .                     [1584...2047] 464 bytes page data
++ * 1999
++ * 2000
++ *   .                     [0...47] 48 bytes OOB data
++ * 2047
++ * ------------- Spare buffer area ---------------------------
++ * 2048     0x800
++ *   .                     [512...527] 16 bytes page data
++ * 2063
++ * 2064
++ *   .                     [1040...1055] 16 bytes page data
++ * 2079
++ * 2080
++ *   .                     [1568...1583] 16 bytes page data
++ * 2095
++ * 2096     0x830
++ *   .                     [48...63] 16 bytes OOB data
++ * 2112
++ *
++ * Due to the strange layout manufacturer's bad block marker will be stored
++ * to offset 2005 in the SRAM. But this offset will be handled later on as
++ * main page data and the information is lost.
++ * To keep manufacturer's bad block marker this function swaps the byte
++ * at offset 2005 with the byte at offset 2053.
++ * Important: This swap must be done prior writing the buffer data to the NAND
++ * and after reading the buffer from the NAND.
++ * Note: This function is only important for NAND devices with 2kiB pages. Its
++ * not required for NAND devices with 512 byte pages.
++ */
++static void mxc_swap_2k_bi_main_sp(struct mxc_nand_host *host)
++{
++	u16 tmp1, tmp2, new_tmp1;
++
++	/* note: Only 16 bit accesses are allowed */
++	tmp1 = readw(host->main_area0 + 2004);
++	tmp2 = readw(host->main_area0 + 2052);
++
++	new_tmp1 = (tmp1 & 0xFF00) | (tmp2 >> 8);
++	tmp2 = (tmp1 << 8) | (tmp2 & 0xFF);
++
++	writew(new_tmp1, host->main_area0 + 2004);
++	writew(tmp2, host->main_area0 + 2052);
++}
++
++/*
+  * Function to transfer data to/from spare area.
+  */
+ static void copy_spare(struct mtd_info *mtd, bool bfrom)
+@@ -586,6 +649,9 @@ static void mxc_nand_command(struct mtd_
+ 
+ 		send_page(mtd, NFC_OUTPUT);
+ 
++		/* fix 2 kiB page issue */
++		mxc_swap_2k_bi_main_sp(host);
++
+ 		memcpy(host->data_buf, host->main_area0, mtd->writesize);
+ 		copy_spare(mtd, true);
+ 		break;
+@@ -624,6 +690,10 @@ static void mxc_nand_command(struct mtd_
+ 	case NAND_CMD_PAGEPROG:
+ 		memcpy(host->main_area0, host->data_buf, mtd->writesize);
+ 		copy_spare(mtd, false);
++
++		/* fix 2 kiB page issue */
++		mxc_swap_2k_bi_main_sp(host);
++
+ 		send_page(mtd, NFC_INPUT);
+ 		send_cmd(host, command, true);
+ 		mxc_do_addr_cycle(mtd, column, page_addr);

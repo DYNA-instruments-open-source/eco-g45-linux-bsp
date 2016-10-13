@@ -1,0 +1,4 @@
+MODULE_NAME=board_configfs_at91sam9g45
+MODULE_FILE=$(/sbin/modinfo $MODULE_NAME| awk '/filename/{gsub(/kernel\//,"",$2); print $2}')
+DIR="/sys/module/${MODULE_NAME}/sections/"
+echo add-symbol-file $MODULE_FILE $(cat "$DIR/.text") -s .bss $(cat "$DIR/.bss") -s .data $(cat "$DIR/.data")

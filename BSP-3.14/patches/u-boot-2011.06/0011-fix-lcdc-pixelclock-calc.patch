@@ -1,0 +1,31 @@
+Index: u-boot-2011.06/drivers/video/atmel_lcdfb.c
+===================================================================
+--- u-boot-2011.06.orig/drivers/video/atmel_lcdfb.c
++++ u-boot-2011.06/drivers/video/atmel_lcdfb.c
+@@ -90,10 +90,11 @@ void lcd_ctrl_init(void *lcdbase)
+ 	lcdc_writel(panel_info.mmio, ATMEL_LCDC_DMAFRMCFG, value);
+ 
+ 	/* Set pixel clock */
+-	value = get_lcdc_clk_rate(0) / panel_info.vl_clk;
++	value = (get_lcdc_clk_rate(0) / panel_info.vl_clk) - 1;
++
++	/* Round down to the nearest frequency. */
+ 	if (get_lcdc_clk_rate(0) % panel_info.vl_clk)
+ 		value++;
+-	value = (value / 2) - 1;
+ 
+ 	if (!value) {
+ 		lcdc_writel(panel_info.mmio, ATMEL_LCDC_LCDCON1, ATMEL_LCDC_BYPASS);
+Index: u-boot-2011.06/include/lcd.h
+===================================================================
+--- u-boot-2011.06.orig/include/lcd.h
++++ u-boot-2011.06/include/lcd.h
+@@ -161,7 +161,7 @@ typedef struct vidinfo {
+ typedef struct vidinfo {
+ 	u_long vl_col;		/* Number of columns (i.e. 640) */
+ 	u_long vl_row;		/* Number of rows (i.e. 480) */
+-	u_long vl_clk;	/* pixel clock in ps    */
++	u_long vl_clk;		/* pixel clock in MHz    */
+ 
+ 	/* LCD configuration register */
+ 	u_long vl_sync;		/* Horizontal / vertical sync */

@@ -1,0 +1,274 @@
+From 79db97487c8ca75dc391908235907135ee007d5b Mon Sep 17 00:00:00 2001
+From: Robert Schwebel <r.schwebel@pengutronix.de>
+Date: Mon, 22 Feb 2010 21:25:11 +0100
+Subject: [PATCH 48/59] guf_neso: nandflash config partition code
+
+Parse the xml config from a flash partition.
+
+Not intended for mainline.
+
+Signed-off-by: Robert Schwebel <r.schwebel@pengutronix.de>
+---
+ drivers/mtd/Kconfig   |   16 ++++
+ drivers/mtd/redboot.c |  199 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 214 insertions(+), 1 deletions(-)
+
+Index: linux-2.6.33/drivers/mtd/Kconfig
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/Kconfig
++++ linux-2.6.33/drivers/mtd/Kconfig
+@@ -72,6 +72,22 @@ config MTD_REDBOOT_PARTS
+ 	  SA1100 map driver (CONFIG_MTD_SA1100) has an option for this, for
+ 	  example.
+ 
++config MTD_GUF_REDBOOT_PARSING
++	tristate "Garz und Fricke XML based RedBoot partition table parsing"
++	depends on MTD_PARTITIONS
++	select LIBEZXML
++	---help---
++	  Say y here to enable parsing for Garz und Fricke XML based RedBoot
++	  partitions.
++
++config MTD_GUF_REDBOOT_FLASH_BASE
++	hex "Location of RedBoot partition table"
++	depends on MTD_GUF_REDBOOT_PARSING
++	default "0xE0000000"
++	---help---
++	  This options specifies the virtual flash base address, which is used
++	  by the RedBoot fis commands
++
+ config MTD_REDBOOT_DIRECTORY_BLOCK
+ 	int "Location of RedBoot partition table"
+ 	depends on MTD_REDBOOT_PARTS
+Index: linux-2.6.33/drivers/mtd/redboot.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/redboot.c
++++ linux-2.6.33/drivers/mtd/redboot.c
+@@ -11,6 +11,17 @@
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/partitions.h>
+ 
++#ifdef CONFIG_MTD_GUF_REDBOOT_PARSING
++#include <linux/ezxml.h>
++#endif
++
++#define GUF_FISDIR_SIZE 0x10000
++#define ACTIVE_FIS_DIRECTORY_SUFFIX " (ACTIVE)"
++
++#ifdef CONFIG_MTD_GUF_REDBOOT_PARSING
++unsigned long current_fis_addr = 0, backup_fis_addr = 0, fis_length = 0;
++#endif
++
+ struct fis_image_desc {
+     unsigned char name[16];      // Null terminated name
+     uint32_t	  flash_base;    // Address within FLASH of image
+@@ -271,8 +282,187 @@ static int parse_redboot_partitions(stru
+ 	}
+ 	vfree(buf);
+ 	return ret;
++ }
++
++#ifdef CONFIG_MTD_GUF_REDBOOT_PARSING
++static int parse_guf_redboot_partitions(struct mtd_info *master,
++                             struct mtd_partition **pparts,
++                             unsigned long fis_origin)
++{
++	int nrparts = 0;
++	char *buf = NULL;
++	struct mtd_partition *parts;
++	int ret = 0, i = 0;
++	size_t retlen;
++	char *names;
++	char *nullname;
++	int namelen = 0;
++	int activelen = strlen(ACTIVE_FIS_DIRECTORY_SUFFIX);
++	unsigned long offset;
++	unsigned long lowest_address = 0xFFFFFFFF, last_address = 0, current_address = 0;
++	int generation = 0;
++
++	struct ezxml *xml_img = 0;
++	struct ezxml *xml_checktag, *xml_flash, *xml_cur_flash, *xml_cur_part = NULL, *xml_part;
++
++	if(!current_fis_addr || !fis_length) {
++		printk("Don't have FIS Directory information\n");
++		goto out;
++	}
++
++	offset = current_fis_addr - CONFIG_MTD_GUF_REDBOOT_FLASH_BASE;
++
++	buf = vmalloc(fis_length);
++
++	ret = master->read(master, offset,
++			fis_length, &retlen, (void *)buf);
++
++	if (ret) {
++		goto out;
++	}
++
++	if (retlen != fis_length) {
++		ret = -EIO;
++		goto out;
++	}
++
++	if(!memcmp(buf, "<?xml", 5)) {
++		/* Found XML config */
++		xml_img = ezxml_parse_str(buf, strlen(buf));
++		if(!xml_img) {
++			printk("NO XML image found!\n");
++			goto out;
++		}
++		/* Does it contain a flash tag? */
++		xml_checktag = ezxml_child(xml_img, "flash");
++		if(!xml_checktag) {
++			printk("No XML checktag\n");
++			ezxml_free(xml_img);
++			goto out_free_xml;
++		}
++		else {
++			/* Now we can parse
++			 * the flash partitions
++			 */
++			xml_flash = ezxml_child(xml_img,
++					"flash");
++			if(!xml_flash) {
++				printk("No XML flash tag found\n");
++				goto out_free_xml;
++			}
++			generation = simple_strtol(
++					ezxml_attr(xml_flash,
++						"generation"), NULL, 0);
++			printk("Using FIS Dir at %lX with generation %d\n", current_fis_addr, generation);
++		}
++	}
++	else {
++		printk("No XML description found!\n");
++		goto out;
++	}
++
++	if(!xml_img) {
++		printk(KERN_NOTICE "No GUF RedBoot partition table detected in %s\n",
++		       master->name);
++		ret = 0;
++		goto out;
++	}
++
++	xml_cur_flash = ezxml_child(xml_img,"flash");
++
++	xml_part  = ezxml_child(xml_cur_flash, "partition");
++
++	if(!xml_part) {
++		printk("No XML partition tag found\n");
++		goto out_free_xml;
++	}
++
++	do {
++		namelen += strlen(ezxml_attr(xml_part, "name")) + 1;
++		xml_part = ezxml_next(xml_part);
++		nrparts++;
++	} while(xml_part);
++
++	parts = kzalloc((sizeof(*parts) * nrparts) + namelen + activelen, GFP_KERNEL);
++	nullname = (char *)&parts[nrparts];
++	names = nullname;
++
++	if (!parts) {
++		ret = -ENOMEM;
++		goto out_free_xml;
++	}
++
++	do {
++		xml_cur_part = NULL;
++		lowest_address = 0xFFFFFFFF;
++
++		/* Find lowest address */
++		for(xml_part  = ezxml_child(xml_cur_flash, "partition");
++				xml_part;
++				xml_part = ezxml_next(xml_part)) {
++			current_address = simple_strtoul(ezxml_attr(xml_part, "flash_base"), NULL, 0);
++			if((current_address >= last_address) &&
++				(current_address < lowest_address)) {
++					lowest_address = current_address;
++					xml_cur_part = xml_part;
++				}
++		}
++
++		if(xml_cur_part) {
++			parts[i].offset = simple_strtoul(ezxml_attr(xml_cur_part, "flash_base"), NULL, 0) - CONFIG_MTD_GUF_REDBOOT_FLASH_BASE;
++			parts[i].size   = simple_strtoul(ezxml_attr(xml_cur_part, "flash_length"), NULL, 0);
++			strcpy(names, (ezxml_attr(xml_cur_part, "name")));
++			parts[i].name   = names;
++			if(parts[i].offset == offset)
++				strcat(parts[i].name, ACTIVE_FIS_DIRECTORY_SUFFIX);
++		}
++
++		names += strlen(names)+1;
++		last_address = lowest_address + 1;
++		i++;
++	} while(xml_cur_part);
++
++	ret = nrparts;
++	*pparts = parts;
++
++out_free_xml:
++	ezxml_free(xml_img);
++out:
++	vfree(buf);
++	return ret;
++}
++
++static struct mtd_part_parser guf_redboot_parser = {
++	.owner = THIS_MODULE,
++	.parse_fn = parse_guf_redboot_partitions,
++	.name = "GufRedBoot",
++};
++
++static int parse_guf_fis_table(char* str)
++{
++	char *opt = NULL;
++
++	if(str) {
++		opt = strsep(&str, ",");
++		current_fis_addr = simple_strtoul(opt, NULL, 0);
++	}
++
++	if(str) {
++		opt = strsep(&str, ",");
++		backup_fis_addr = simple_strtoul(opt, NULL, 0);
++	}
++
++	if(str) {
++		opt = strsep(&str, ",");
++		fis_length = simple_strtoul(opt, NULL, 0);
++	}
++
++	return 0;
+ }
+ 
++__setup("rbfis=",parse_guf_fis_table);
++#endif
++
+ static struct mtd_part_parser redboot_parser = {
+ 	.owner = THIS_MODULE,
+ 	.parse_fn = parse_redboot_partitions,
+@@ -281,12 +471,20 @@ static struct mtd_part_parser redboot_pa
+ 
+ static int __init redboot_parser_init(void)
+ {
+-	return register_mtd_parser(&redboot_parser);
++	int ret;
++	ret = register_mtd_parser(&redboot_parser);
++#ifdef CONFIG_MTD_GUF_REDBOOT_PARSING
++	ret |= register_mtd_parser(&guf_redboot_parser);
++#endif
++	return ret;
+ }
+ 
+ static void __exit redboot_parser_exit(void)
+ {
+ 	deregister_mtd_parser(&redboot_parser);
++#ifdef CONFIG_MTD_GUF_REDBOOT_PARSING
++	deregister_mtd_parser(&guf_redboot_parser);
++#endif
+ }
+ 
+ module_init(redboot_parser_init);

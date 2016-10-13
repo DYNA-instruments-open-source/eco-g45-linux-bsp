@@ -1,0 +1,8 @@
+#!/bin/sh
+#
+# /etc/init.d/telnetd
+#
+# $Id: ftpd 332 2010-10-20 13:48:06Z grimm $
+#
+echo "Starting ftpd..."
+	/usr/bin/tcpsvd -vE 0.0.0.0 21 ftpd -w / &

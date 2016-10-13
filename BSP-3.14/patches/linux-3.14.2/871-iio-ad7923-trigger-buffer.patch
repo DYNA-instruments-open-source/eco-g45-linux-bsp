@@ -1,0 +1,36 @@
+--- a/drivers/iio/adc/ad7923.c
++++ b/drivers/iio/adc/ad7923.c
+@@ -152,7 +152,8 @@ static int ad7923_update_scan_mode(struc
+   }
+   /* build spi ring message */
+   st->ring_xfer[0].tx_buf = &st->tx_buf[0];
+-  st->ring_xfer[0].len = len;
++  st->ring_xfer[0].rx_buf = 0;
++  st->ring_xfer[0].len = 2;
+   st->ring_xfer[0].cs_change = 1;
+ 
+   spi_message_init(&st->ring_msg);
+@@ -160,12 +161,13 @@ static int ad7923_update_scan_mode(struc
+ 
+   for (i = 0; i < len; i++) {
+     st->ring_xfer[i + 1].rx_buf = &st->rx_buf[i];
++    st->ring_xfer[i + 1].tx_buf = &st->tx_buf[i + 1];
+     st->ring_xfer[i + 1].len = 2;
+     st->ring_xfer[i + 1].cs_change = 1;
+     spi_message_add_tail(&st->ring_xfer[i + 1], &st->ring_msg);
+   }
+   /* make sure last transfer cs_change is not set */
+-  st->ring_xfer[i + 1].cs_change = 0;
++  st->ring_xfer[i].cs_change = 0;
+ 
+   return 0;
+ }
+@@ -309,7 +311,7 @@ static int ad7923_probe(struct spi_devic
+ 
+   indio_dev->name = spi_get_device_id(spi)->name;
+   indio_dev->dev.parent = &spi->dev;
+-  indio_dev->modes = INDIO_DIRECT_MODE;
++  indio_dev->modes = INDIO_DIRECT_MODE | INDIO_BUFFER_TRIGGERED;
+   indio_dev->channels = info->channels;
+   indio_dev->num_channels = info->num_channels;
+   indio_dev->info = &ad7923_info;

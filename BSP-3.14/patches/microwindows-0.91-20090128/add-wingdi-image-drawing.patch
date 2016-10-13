@@ -1,0 +1,112 @@
+Index: microwindows-0.91-20090128/src/include/wingdi.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/wingdi.h
++++ microwindows-0.91-20090128/src/include/wingdi.h
+@@ -140,6 +140,12 @@ BOOL WINAPI	Pie(HDC hdc, int nLeftRect,
+ BOOL WINAPI	Polygon(HDC hdc, CONST POINT *lpPoints, int nCount);
+ int WINAPI	FillRect(HDC hDC, CONST RECT *lprc, HBRUSH hbr);
+ BOOL WINAPI	DrawFocusRect(HDC hdc, LPRECT prect);
++BOOL WINAPI DrawImageFromFile(HDC hdc, int x, int y,
++                  int width, int height, char *path);
++int WINAPI LoadImageFromFile(HDC hdc, char *path);
++BOOL WINAPI DrawImage(HDC hdc, int x, int y,
++                  int width, int height, int id);
++void WINAPI FreeImage(HDC hdc,  int id);
+ 
+ /* ExTextOut options*/
+ #define ETO_OPAQUE	0x0002
+Index: microwindows-0.91-20090128/src/mwin/wingdi.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/mwin/wingdi.c
++++ microwindows-0.91-20090128/src/mwin/wingdi.c
+@@ -593,6 +593,90 @@ Ellipse(HDC hdc, int nLeftRect, int nTop
+ 	return TRUE;
+ }
+ 
++BOOL WINAPI
++DrawImageFromFile(HDC hdc, int x, int y,
++                  int width, int height, char *path)
++{
++	HWND		hwnd;
++	POINT		pt;
++
++	hwnd = MwPrepareDC(hdc);
++	if(!hwnd)
++		return FALSE;
++
++	pt.x = x;
++	pt.y = y;
++
++	if(MwIsClientDC(hdc)) {
++		ClientToScreen(hwnd, &pt);
++	}
++
++	/* draw the image */
++	if(hdc->pen->style != PS_NULL) {
++		GdDrawImageFromFile(hdc->psd, pt.x, pt.y, width, height, path, 0);
++	}
++
++	return TRUE;
++}
++
++int WINAPI
++LoadImageFromFile(HDC hdc, char *path)
++{
++	HWND		hwnd;
++
++	hwnd = MwPrepareDC(hdc);
++	if(!hwnd)
++		return 0;
++
++	return GdLoadImageFromFile(hdc->psd, path, 0);
++}
++
++BOOL WINAPI
++DrawImage(HDC hdc, int x, int y,
++                  int width, int height, int id)
++{
++	HWND		hwnd;
++	POINT		pt;
++
++	hwnd = MwPrepareDC(hdc);
++	if(!hwnd)
++		return FALSE;
++
++	pt.x = x;
++	pt.y = y;
++
++	if(MwIsClientDC(hdc)) {
++		ClientToScreen(hwnd, &pt);
++	}
++
++	/* draw the image */
++	if(hdc->pen->style != PS_NULL) {
++		if (id) {
++			GdDrawImageToFit(hdc->psd, pt.x, pt.y, width, height, id);
++		}
++		else
++		{
++			return FALSE;
++		}
++	}
++	return TRUE;
++}
++
++void WINAPI
++FreeImage(HDC hdc,  int id)
++{
++	HWND		hwnd;
++
++	hwnd = MwPrepareDC(hdc);
++	if(!hwnd)
++		return;
++
++	if(id)
++	{
++		GdFreeImage(id);
++	}
++}
++
+ static void
+ dopiearc(HDC hdc, int nLeftRect, int nTopRect, int nRightRect, int nBottomRect,
+ 	int ax, int ay, int bx, int by, int type)

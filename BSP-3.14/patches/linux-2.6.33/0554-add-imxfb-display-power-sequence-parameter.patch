@@ -1,0 +1,190 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/imxfb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/imxfb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/imxfb.h
+@@ -76,8 +76,14 @@ struct imx_fb_platform_data {
+ 	int (*init)(struct platform_device *);
+ 	void (*exit)(struct platform_device *);
+ 
+-	void (*lcd_power)(int);
+-	void (*backlight_power)(int);
++	int16_t	poweron_to_signalon;			/* time from LCD-on to signal on */
++	int16_t	poweron_to_backlighton;			/* time from LCD-on to backlight on */
++	int16_t	backlightoff_before_poweroff;	/* req. time to turn-off backlight before LCD-off */
++	int16_t	signaloff_before_poweroff;		/* req. time to turn-off signal before LCD-off */
++	int16_t	poweroff_to_poweron;			/* req. time display must remain off before powering it on again */
++
++	struct device *backlight_dev;
++	struct device *lcd_dev;
+ };
+ 
+ void set_imx_fb_info(struct imx_fb_platform_data *);
+Index: linux-2.6.33/drivers/video/imxfb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/imxfb.c
++++ linux-2.6.33/drivers/video/imxfb.c
+@@ -31,6 +31,8 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/io.h>
+ #include <linux/math64.h>
++#include <linux/backlight.h>
++#include <linux/lcd.h>
+ 
+ #include <mach/imxfb.h>
+ #include <mach/hardware.h>
+@@ -176,8 +178,14 @@ struct imxfb_info {
+ 	struct imx_fb_videomode *mode;
+ 	int			num_modes;
+ 
+-	void (*lcd_power)(int);
+-	void (*backlight_power)(int);
++	int16_t	poweron_to_signalon;			/* time from LCD-on to signal on */
++	int16_t	poweron_to_backlighton;			/* time from LCD-on to backlight on */
++	int16_t	backlightoff_before_poweroff;	/* req. time to turn-off backlight before LCD-off */
++	int16_t	signaloff_before_poweroff;		/* req. time to turn-off signal before LCD-off */
++	int16_t	poweroff_to_poweron;			/* req. time display must remain off before powering it on again */
++
++	struct device *backlight_dev;
++	struct device *lcd_dev;
+ };
+ 
+ #define IMX_NAME	"IMX"
+@@ -478,27 +486,67 @@ static void imxfb_enable_controller(stru
+ 	writel(RMCR_LCDC_EN, fbi->regs + LCDC_RMCR);
+ 
+ 	clk_enable(fbi->clk);
+-
+-	if (fbi->backlight_power)
+-		fbi->backlight_power(1);
+-	if (fbi->lcd_power)
+-		fbi->lcd_power(1);
+ }
+ 
+ static void imxfb_disable_controller(struct imxfb_info *fbi)
+ {
+ 	pr_debug("Disabling LCD controller\n");
+ 
+-	if (fbi->backlight_power)
+-		fbi->backlight_power(0);
+-	if (fbi->lcd_power)
+-		fbi->lcd_power(0);
+-
+ 	clk_disable(fbi->clk);
+ 
+ 	writel(0, fbi->regs + LCDC_RMCR);
+ }
+ 
++static void imxfb_enable_display(struct imxfb_info *fbi)
++{
++	/* power on the display */
++	if(fbi->lcd_dev) {
++		lcd_set_power(fbi->lcd_dev, FB_BLANK_UNBLANK);
++	}
++	if(fbi->poweron_to_signalon < fbi->poweron_to_backlighton) {
++		msleep(fbi->poweron_to_signalon);
++		/* enable display controller */
++		imxfb_enable_controller(fbi);
++		msleep(fbi->poweron_to_backlighton - fbi->poweron_to_signalon);
++		/* enable backlight */
++		if(fbi->backlight_dev)
++			backlight_set_power(fbi->backlight_dev, FB_BLANK_UNBLANK);
++	} else {
++		msleep(fbi->poweron_to_backlighton);
++		/* enable backlight */
++		if(fbi->backlight_dev)
++			backlight_set_power(fbi->backlight_dev, FB_BLANK_UNBLANK);
++		msleep(fbi->poweron_to_signalon - fbi->poweron_to_backlighton);
++		/* enable display controller */
++		imxfb_enable_controller(fbi);
++	}
++}
++
++static void imxfb_disable_display(struct imxfb_info *fbi)
++{
++	if(fbi->signaloff_before_poweroff < fbi->backlightoff_before_poweroff) {
++		/* disable backlight */
++		if(fbi->backlight_dev)
++			backlight_set_power(fbi->backlight_dev, FB_BLANK_POWERDOWN);
++		msleep(fbi->backlightoff_before_poweroff - fbi->signaloff_before_poweroff);
++		/* disable display controller */
++		imxfb_disable_controller(fbi);
++		msleep(fbi->signaloff_before_poweroff);
++	} else {
++		/* disable display controller */
++		imxfb_disable_controller(fbi);
++		msleep(fbi->signaloff_before_poweroff - fbi->backlightoff_before_poweroff);
++		/* disable backlight */
++		if(fbi->backlight_dev)
++			backlight_set_power(fbi->backlight_dev, FB_BLANK_POWERDOWN);
++		msleep(fbi->backlightoff_before_poweroff);
++	}
++	/* power off the display */
++	if(fbi->lcd_dev) {
++		lcd_set_power(fbi->lcd_dev, FB_BLANK_POWERDOWN);
++	}
++}
++
+ static int imxfb_blank(int blank, struct fb_info *info)
+ {
+ 	struct imxfb_info *fbi = info->par;
+@@ -510,11 +558,11 @@ static int imxfb_blank(int blank, struct
+ 	case FB_BLANK_VSYNC_SUSPEND:
+ 	case FB_BLANK_HSYNC_SUSPEND:
+ 	case FB_BLANK_NORMAL:
+-		imxfb_disable_controller(fbi);
++		imxfb_disable_display(fbi);
+ 		break;
+ 
+ 	case FB_BLANK_UNBLANK:
+-		imxfb_enable_controller(fbi);
++		imxfb_enable_display(fbi);
+ 		break;
+ 	}
+ 	return 0;
+@@ -611,8 +659,8 @@ static int imxfb_suspend(struct platform
+ 
+ 	pr_debug("%s\n", __func__);
+ 
+-	imxfb_disable_controller(fbi);
+-	return 0;
++		imxfb_disable_display(fbi);
++		return 0;
+ }
+ 
+ static int imxfb_resume(struct platform_device *dev)
+@@ -622,8 +670,8 @@ static int imxfb_resume(struct platform_
+ 
+ 	pr_debug("%s\n", __func__);
+ 
+-	imxfb_enable_controller(fbi);
+-	return 0;
++		imxfb_enable_display(fbi);
++		return 0;
+ }
+ #else
+ #define imxfb_suspend	NULL
+@@ -671,8 +719,6 @@ static int __init imxfb_init_fbinfo(stru
+ 	fbi->lscr1			= pdata->lscr1;
+ 	fbi->dmacr			= pdata->dmacr;
+ 	fbi->pwmr			= pdata->pwmr;
+-	fbi->lcd_power			= pdata->lcd_power;
+-	fbi->backlight_power		= pdata->backlight_power;
+ 
+ 	for (i = 0, m = &pdata->mode[0]; i < pdata->num_modes; i++, m++)
+ 		info->fix.smem_len = max_t(size_t, info->fix.smem_len,
+@@ -761,6 +807,15 @@ static int __init imxfb_probe(struct pla
+ 		info->fix.smem_start = fbi->screen_dma;
+ 	}
+ 
++	/* Set up display power sequence */
++	fbi->poweron_to_signalon = pdata->poweron_to_signalon;
++	fbi->poweron_to_backlighton = pdata->poweron_to_backlighton;
++	fbi->backlightoff_before_poweroff = pdata->backlightoff_before_poweroff;
++	fbi->signaloff_before_poweroff = pdata->signaloff_before_poweroff;
++	fbi->poweroff_to_poweron = pdata->poweroff_to_poweron;
++	fbi->backlight_dev = pdata->backlight_dev;
++	fbi->lcd_dev = pdata->lcd_dev;
++
+ 	if (pdata->init) {
+ 		ret = pdata->init(fbi->pdev);
+ 		if (ret)

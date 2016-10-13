@@ -1,0 +1,199 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mx3fb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+@@ -38,6 +38,15 @@ struct mx3fb_platform_data {
+ 	unsigned long			bpp;
+ 	u_char * 			fixed_screen_cpu;
+ 	dma_addr_t 			fixed_screen_dma;
++
++	int16_t	poweron_to_signalon;			/* time from LCD-on to signal on */
++	int16_t	poweron_to_backlighton;			/* time from LCD-on to backlight on */
++	int16_t	backlightoff_before_poweroff;	/* req. time to turn-off backlight before LCD-off */
++	int16_t	signaloff_before_poweroff;		/* req. time to turn-off signal before LCD-off */
++	int16_t	poweroff_to_poweron;			/* req. time display must remain off before powering it on again */
++
++	struct device *backlight_dev;
++	struct device *lcd_dev;
+ };
+ 
+ #endif
+Index: linux-2.6.33/drivers/video/mx3fb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/mx3fb.c
++++ linux-2.6.33/drivers/video/mx3fb.c
+@@ -26,6 +26,8 @@
+ #include <linux/console.h>
+ #include <linux/clk.h>
+ #include <linux/mutex.h>
++#include <linux/backlight.h>
++#include <linux/lcd.h>
+ 
+ #include <mach/hardware.h>
+ #include <mach/ipu.h>
+@@ -116,6 +118,15 @@
+ static 	u_char * 			fixed_screen_cpu = 0;
+ static	dma_addr_t 			fixed_screen_dma = 0;
+ 
++static int16_t	poweron_to_signalon;			/* time from LCD-on to signal on */
++static int16_t	poweron_to_backlighton;			/* time from LCD-on to backlight on */
++static int16_t	backlightoff_before_poweroff;	/* req. time to turn-off backlight before LCD-off */
++static int16_t	signaloff_before_poweroff;		/* req. time to turn-off signal before LCD-off */
++static int16_t	poweroff_to_poweron;			/* req. time display must remain off before powering it on again */
++
++static struct device *backlight_dev;
++static struct device *lcd_dev;
++
+ enum ipu_panel {
+ 	IPU_PANEL_SHARP_TFT,
+ 	IPU_PANEL_TFT,
+@@ -238,7 +249,7 @@ static const struct fb_videomode mx3fb_m
+ 
+ struct mx3fb_data {
+ 	struct fb_info		*fbi;
+-	int			backlight_level;
++	int			brightness_level;
+ 	void __iomem		*reg_base;
+ 	spinlock_t		lock;
+ 	struct device		*dev;
+@@ -698,6 +709,60 @@ static int mx3fb_setcolreg(unsigned int
+ 	return ret;
+ }
+ 
++static void mx3fb_enable_display(struct fb_info *fbi) {
++	struct mx3fb_info *mx3_fbi = fbi->par;
++	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
++
++	/* power on the display */
++	if(lcd_dev) {
++		lcd_set_power(lcd_dev, FB_BLANK_UNBLANK);
++	}
++	if(poweron_to_signalon < poweron_to_backlighton) {
++		msleep(poweron_to_signalon);
++		/* enable IPU channel */
++		sdc_enable_channel(mx3_fbi);
++		msleep(poweron_to_backlighton - poweron_to_signalon);
++		/* enable backlight */
++		if(backlight_dev)
++			backlight_set_power(backlight_dev, FB_BLANK_UNBLANK);
++	} else {
++		msleep(poweron_to_backlighton);
++		/* enable backlight */
++		if(backlight_dev)
++			backlight_set_power(backlight_dev, FB_BLANK_UNBLANK);
++		msleep(poweron_to_signalon - poweron_to_backlighton);
++		/* enable IPU channel*/
++		sdc_enable_channel(mx3_fbi);
++	}
++}
++
++static void mx3fb_disable_display(struct fb_info *fbi) {
++	struct mx3fb_info *mx3_fbi = fbi->par;
++	struct mx3fb_data *mx3fb = mx3_fbi->mx3fb;
++
++	if(signaloff_before_poweroff < backlightoff_before_poweroff) {
++		/* disable backlight */
++		if(backlight_dev)
++			backlight_set_power(backlight_dev, FB_BLANK_POWERDOWN);
++		msleep(backlightoff_before_poweroff - signaloff_before_poweroff);
++		/* disable IPU channel*/
++		sdc_disable_channel(mx3_fbi);
++		msleep(signaloff_before_poweroff);
++	} else {
++		/* disable IPU channel*/
++		sdc_disable_channel(mx3_fbi);
++		msleep(signaloff_before_poweroff - backlightoff_before_poweroff);
++		/* disable backlight */
++		if(backlight_dev)
++			backlight_set_power(backlight_dev, FB_BLANK_POWERDOWN);
++		msleep(backlightoff_before_poweroff);
++	}
++	/* power off the display */
++	if(lcd_dev) {
++		lcd_set_power(lcd_dev, FB_BLANK_POWERDOWN);
++	}
++}
++
+ static void __blank(int blank, struct fb_info *fbi)
+ {
+ 	struct mx3fb_info *mx3_fbi = fbi->par;
+@@ -714,11 +779,11 @@ static void __blank(int blank, struct fb
+ 		memset((char *)fbi->screen_base, 0, fbi->fix.smem_len);
+ 		/* Give LCD time to update - enough for 50 and 60 Hz */
+ 		msleep(25);
+-		sdc_disable_channel(mx3_fbi);
++		mx3fb_disable_display(fbi);
+ 		break;
+ 	case FB_BLANK_UNBLANK:
+-		sdc_enable_channel(mx3_fbi);
+-		sdc_set_brightness(mx3fb, mx3fb->backlight_level);
++		mx3fb_enable_display(fbi);
++		sdc_set_brightness(mx3fb, mx3fb->brightness_level);
+ 		break;
+ 	}
+ }
+@@ -898,9 +963,8 @@ static int mx3fb_suspend(struct platform
+ 	release_console_sem();
+ 
+ 	if (mx3_fbi->blank == FB_BLANK_UNBLANK) {
+-		sdc_disable_channel(mx3_fbi);
++		mx3fb_disable_display(mx3fb->fbi);
+ 		sdc_set_brightness(mx3fb, 0);
+-
+ 	}
+ 	return 0;
+ }
+@@ -914,8 +978,8 @@ static int mx3fb_resume(struct platform_
+ 	struct mx3fb_info *mx3_fbi = mx3fb->fbi->par;
+ 
+ 	if (mx3_fbi->blank == FB_BLANK_UNBLANK) {
+-		sdc_enable_channel(mx3_fbi);
+-		sdc_set_brightness(mx3fb, mx3fb->backlight_level);
++		mx3fb_enable_display(mx3fb->fbi);
++		sdc_set_brightness(mx3fb, mx3fb->brightness_level);
+ 	}
+ 
+ 	acquire_console_sem();
+@@ -1102,7 +1166,7 @@ static int init_fb_chan(struct mx3fb_dat
+ 	mx3fbi->idmac_channel	= ichan;
+ 	mx3fbi->ipu_ch		= ichan->dma_chan.chan_id;
+ 	mx3fbi->mx3fb		= mx3fb;
+-	mx3fbi->blank		= FB_BLANK_NORMAL;
++	mx3fbi->blank		= FB_BLANK_UNBLANK;
+ 
+ 	init_completion(&mx3fbi->flip_cmpl);
+ 	disable_irq(ichan->eof_irq);
+@@ -1117,6 +1181,9 @@ static int init_fb_chan(struct mx3fb_dat
+ 	if (ret < 0)
+ 		goto erfb;
+ 
++	sdc_enable_channel(mx3fbi);
++	sdc_set_brightness(mx3fb, mx3fb->brightness_level);
++
+ 	return 0;
+ 
+ erfb:
+@@ -1205,6 +1272,14 @@ static int mx3fb_probe(struct platform_d
+ 	    fixed_screen_dma = mx3fb_pdata->fixed_screen_dma;
+ 	}
+ 
++	/* Set up display power sequence */
++	poweron_to_signalon = mx3fb_pdata->poweron_to_signalon;
++	poweron_to_backlighton = mx3fb_pdata->poweron_to_backlighton;
++	backlightoff_before_poweroff = mx3fb_pdata->backlightoff_before_poweroff;
++	signaloff_before_poweroff = mx3fb_pdata->signaloff_before_poweroff;
++	poweroff_to_poweron = mx3fb_pdata->poweroff_to_poweron;
++	backlight_dev = mx3fb_pdata->backlight_dev;
++	lcd_dev = mx3fb_pdata->lcd_dev;
+ 
+ 	rq.mx3fb = mx3fb;
+ 
+@@ -1218,7 +1293,7 @@ static int mx3fb_probe(struct platform_d
+ 		goto ersdc0;
+ 	}
+ 
+-	mx3fb->backlight_level = 255;
++	mx3fb->brightness_level = 255;
+ 
+ 	ret = init_fb_chan(mx3fb, to_idmac_chan(chan));
+ 	if (ret < 0)

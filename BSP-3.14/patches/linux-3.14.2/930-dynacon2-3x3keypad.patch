@@ -1,0 +1,207 @@
+--- a/arch/arm/mach-at91/Kconfig.non_dt
++++ b/arch/arm/mach-at91/Kconfig.non_dt
+@@ -357,6 +357,7 @@ config MACH_ECOG45_EVAL
+ 
+ endchoice
+ 
++if MACH_ECOG45
+ config MACH_ECOG45_DYNAVEL21
+     tristate "DYNA Instruments GmbH DYNAvel board Rev 2.1"
+     depends on ARCH_AT91SAM9G45 && MACH_ECOG45 && !MACH_AT91SAM9M10G45EK && !MACH_ECOG45_EVAL
+@@ -377,6 +378,35 @@ config MACH_ECOG45_DYNAVEL22
+ 
+       This enables support for NXP SJA1000 CAN controller.
+ 
++config MACH_ECOG45_DYNAKAS
++    tristate "DYNA Instruments GmbH DYNAkas"
++    depends on ARCH_AT91SAM9G45 && MACH_ECOG45 && !MACH_AT91SAM9M10G45EK && !MACH_ECOG45_EVAL
++    select KEYBOARD_MATRIX
++    help
++      Select this for the DYNA Instruments GmbH DYNAconII/KASmain
++
++      The following board Revisions are supported: 1-3, 2-0.
++
++if MACH_ECOG45_DYNAKAS
++choice
++  prompt "Default DYNAkas main board type"
++
++config MACH_ECOG45_DYNAKAS_DEFAULT_REV1_3
++    bool "Rev 1-3"
++    help
++      DYNAkas main board revision 1-3.
++
++config MACH_ECOG45_DYNAKAS_DEFAULT_REV2_0
++    bool "Rev 2-0"
++    help
++      DYNAkas main board revision 2-0.
++
++endchoice
++
++endif
++
++endif
++
+ endif
+ 
+ # ----------------------------------------------------------
+--- a/arch/arm/mach-at91/Makefile
++++ b/arch/arm/mach-at91/Makefile
+@@ -83,6 +83,7 @@ obj-$(CONFIG_MACH_AT91SAM9M10G45EK) += b
+ obj-$(CONFIG_MACH_AT91SAM9G45_CONFIG)	+= board-configfs-at91sam9g45.o
+ obj-$(CONFIG_MACH_ECOG45_DYNAVEL21)    += board-dynavel-hwrev21-can-oki9620.o
+ obj-$(CONFIG_MACH_ECOG45_DYNAVEL22)    += board-dynavel-hwrev22-can-sja1000.o
++obj-$(CONFIG_MACH_ECOG45_DYNAKAS)    += board-dynacon-3x3keypad.o
+ obj-$(CONFIG_MACH_ECOG45)			+= board-eco-g45.o
+ obj-$(CONFIG_MACH_ECOG45_EVAL)		+= board-eco-g45.o board-eval-eco-g45.o
+ 
+--- /dev/null
++++ b/arch/arm/mach-at91/board-dynacon-3x3keypad.c
+@@ -0,0 +1,148 @@
++/*
++ * board-dynacon-3x3keypad.c
++ *
++ *  Created on: 16.12.2014
++ *      Author: lode
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/platform_device.h>
++#include <linux/input.h>
++#include <linux/input/matrix_keypad.h>
++
++enum KeyMatrixLine
++{
++  Kb3 = 0, Kb2, Kb1,
++  Kb4 = 0, Kb5, Kb6,
++};
++
++static const uint32_t keymap_rev1_0[] = {
++    KEY(Kb3, Kb4, KEY_ESC),     /* ESC -Escape */
++    KEY(Kb3, Kb5, KEY_N),       /* N - Num */
++    KEY(Kb3, Kb6, KEY_R),       /* R - Run */
++    KEY(Kb2, Kb4, KEY_LINEFEED),/* LF - Enter */
++    KEY(Kb2, Kb5, KEY_S),       /* S - Save */
++    KEY(Kb2, Kb6, KEY_C),       /* C - Clear */
++    KEY(Kb1, Kb4, KEY_U),       /* U - Pfeil nach oben/rechts */
++    KEY(Kb1, Kb5, KEY_D),       /* D - Pfeil nach unten/links */
++    KEY(Kb1, Kb6, KEY_UNKNOWN), /* unbenutzte Kombination */
++};
++
++// Folien-Tastatur Rev 1-0
++static struct matrix_keymap_data keymap_data_rev1_0 = {
++    .keymap   = keymap_rev1_0,
++    .keymap_size  = ARRAY_SIZE(keymap_rev1_0),
++};
++
++static const int row_gpios_rev1_3[] =
++{
++    1,    // PA1,  KB_COL_2, Kb4
++    0,    // PA0,  KB_COL_1, Kb5
++    107,  // PD11, KB_COL_0, Kb6
++};
++static const int col_gpios_rev1_3[] =
++{
++    2,    // PA2,  KB_COL_3, Kb3
++    59,   // PB27, KB_COL_4, Kb2
++    58,   // PB26, KB_COL_5, Kb1
++};
++
++static const int row_gpios_rev2_0[] =
++{
++    1,    // PA1,  KB_COL_2, Kb4
++    0,    // PA0,  KB_COL_1, Kb5
++    107,  // PD11, KB_COL_0, Kb6
++};
++static const int col_gpios_rev2_0[] =
++{
++    2,    // PA2,  KB_COL_3, Kb3
++    59,   // PB27, KB_COL_4, Kb2
++    58,   // PB26, KB_COL_5, Kb1
++};
++
++static struct matrix_keypad_platform_data kbd_pdata = {
++    .keymap_data    = &keymap_data_rev1_0,
++    .row_gpios    = row_gpios_rev1_3,
++    .col_gpios    = col_gpios_rev1_3,
++    .num_row_gpios    = ARRAY_SIZE(row_gpios_rev1_3),
++    .num_col_gpios    = ARRAY_SIZE(col_gpios_rev1_3),
++    .col_scan_delay_us  = 100,
++    .debounce_ms    = 30,
++    .wakeup     = 0,
++    .active_low = 1,
++};
++
++static struct platform_device kbd_device = {
++    .name   = "matrix-keypad",
++    .id   = -1,
++    .dev    = {
++        .platform_data = &kbd_pdata,
++    },
++};
++
++#ifdef CONFIG_MACH_ECOG45_DYNAKAS_DEFAULT_REV1_3
++static unsigned board_id = 0x67;  // aka 103
++module_param(board_id, uint, 0444);
++MODULE_PARM_DESC(board_id, " DYNAconII KASmain board ID: 0x67=Rev1-3 (default), 0xc8=Rev2-0");
++
++#elif defined(CONFIG_MACH_ECOG45_DYNAKAS_DEFAULT_REV2_0)
++static unsigned board_id = 0xC8;  // aka 200
++module_param(board_id, uint, 0444);
++MODULE_PARM_DESC(board_id, " DYNAconII KASmain board ID: 0x67=Rev1-3, 0xc8=Rev2-0 (default)");
++
++#endif
++
++// TODO: Revision der Folien-Tastatur erfassen
++
++static int __init board_keypad_init(void)
++{
++  int ret = 0;
++
++  switch (board_id)
++  {
++  case 0xc8:
++    kbd_pdata.row_gpios = row_gpios_rev2_0;
++    kbd_pdata.num_row_gpios = ARRAY_SIZE(row_gpios_rev2_0);
++    kbd_pdata.col_gpios = col_gpios_rev2_0;
++    kbd_pdata.num_col_gpios = ARRAY_SIZE(col_gpios_rev2_0);
++    printk(KERN_INFO "DYNAconII keypad: installing for board rev 2-0\n");
++    break;
++  case 0x67:
++    kbd_pdata.row_gpios = row_gpios_rev1_3;
++    kbd_pdata.num_row_gpios = ARRAY_SIZE(row_gpios_rev1_3);
++    kbd_pdata.col_gpios = col_gpios_rev1_3;
++    kbd_pdata.num_col_gpios = ARRAY_SIZE(col_gpios_rev1_3);
++    printk(KERN_INFO "DYNAconII keypad: installing for board rev 1-3\n");
++    break;
++  default:
++    printk(KERN_ERR "DYNAconII keypad: unknown board id: 0x%X\n", board_id);
++    ret = -ENODEV;
++    break;
++  }
++
++  /* register device */
++  if (!ret)
++    ret = platform_device_register(&kbd_device);
++
++  return ret;
++}
++
++static void __exit board_keypad_exit(void)
++{
++  platform_device_unregister(&kbd_device);
++}
++
++module_param_named(scan_delay, kbd_pdata.col_scan_delay_us, uint, 0444);
++MODULE_PARM_DESC(scan_delay, " matrix column scan delay in us units, default: 100");
++
++module_param_named(debounce, kbd_pdata.debounce_ms, uint, 0444);
++MODULE_PARM_DESC(debounce, " key debounce time in ms units, default: 30");
++
++module_init(board_keypad_init);
++module_exit(board_keypad_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Johannes Lode <linuxer>@quantentunnel.de");
++MODULE_DESCRIPTION("Platform device module for the 3x3 keypad matrix in the DYNAconII cassette.");

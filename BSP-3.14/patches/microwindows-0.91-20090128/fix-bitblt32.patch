@@ -1,0 +1,83 @@
+Index: microwindows-0.91-20090128/src/include/device.h
+===================================================================
+--- microwindows-0.91-20090128.orig/src/include/device.h	2010-11-17 15:59:52.778615100 +0100
++++ microwindows-0.91-20090128/src/include/device.h	2010-11-17 16:01:27.160811000 +0100
+@@ -69,11 +69,11 @@
+ #endif /* MW_FEATURE_GDERROR*/
+ 
+ /* Which low-level psd->DrawArea routines to include. */
+-#define MW_FEATURE_PSDOP_COPY                   1
++#define MW_FEATURE_PSDOP_COPY                   0
+ #define MW_FEATURE_PSDOP_ALPHAMAP               0
+-#define MW_FEATURE_PSDOP_ALPHACOL               0
++#define MW_FEATURE_PSDOP_ALPHACOL               1
+ #define MW_FEATURE_PSDOP_BITMAP_BYTES_LSB_FIRST 0
+-#define MW_FEATURE_PSDOP_BITMAP_BYTES_MSB_FIRST 0
++#define MW_FEATURE_PSDOP_BITMAP_BYTES_MSB_FIRST 1
+ 
+ /* max char height/width must be >= 16 and a multiple of sizeof(MWIMAGEBITS)*/
+ #define MAX_CHAR_HEIGHT	128			/* maximum text bitmap height*/
+Index: microwindows-0.91-20090128/src/drivers/fblin32.c
+===================================================================
+--- microwindows-0.91-20090128.orig/src/drivers/fblin32.c	2010-11-17 16:02:45.156114854 +0100
++++ microwindows-0.91-20090128/src/drivers/fblin32.c	2010-11-17 16:12:32.019360000 +0100
+@@ -199,13 +199,21 @@
+ 			src += slinelen;
+ 		}
+ 	} else {
+-		for(i=0; i < w; ++i) {
+-			applyOp(MWROP_TO_MODE(op), *src, dst, ADDR32);
+-			++src;
+-			++dst;
++		while (--h >= 0) {
++			for(i=0; i < w; ++i) {
++				if(op == MWROP_SRC_OVER)
++				{
++					if(*src != 0xFFFFFF)
++						*dst = *src;
++					}
++					else
++						applyOp(MWROP_TO_MODE(op), *src, dst, ADDR32);
++					++src;
++					++dst;
++			}
++			dst += dlinelen - w;
++			src += slinelen - w;
+ 		}
+-		dst += dlinelen - w;
+-		src += slinelen - w;
+ 	}
+ 	DRAWOFF;
+ }
+@@ -265,7 +273,11 @@
+ 				pixel = *src++;
+ 				col_pos -= 0x10000L;
+ 			}
+-			*dst++ = pixel;
++
++            if((op == MWROP_SRC_OVER) && (pixel == 0xFFFFFF))
++				dst++;
++            else
++				*dst++ = pixel;
+ 			col_pos += col_inc;
+ 		}
+ 
+@@ -509,7 +521,10 @@
+ 
+ 			x_count = width;
+ 			while (x_count-- > 0) {
+-				applyOp(MWROP_TO_MODE(op), *src_ptr, dest_ptr, ADDR32);
++				if((op == MWROP_SRC_OVER) && (*src_ptr == 0xFFFFFF))
++					;
++        	    else
++					applyOp(MWROP_TO_MODE(op), *src_ptr, dest_ptr, ADDR32);
+ 				dest_ptr++;
+ 
+ 				src_ptr += src_x_step_normal;
+@@ -1106,5 +1121,5 @@
+ 	linear32_blit,
+ 	linear32_drawarea,
+ 	linear32_stretchblit,
+-	linear32_stretchblitex,
++	linear32_stretchblitex
+ };

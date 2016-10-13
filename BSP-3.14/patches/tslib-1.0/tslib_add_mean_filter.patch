@@ -1,0 +1,216 @@
+Index: tslib-1.0/configure.ac
+===================================================================
+--- tslib-1.0.orig/configure.ac
++++ tslib-1.0/configure.ac
+@@ -88,6 +88,15 @@ AC_ARG_ENABLE(median,
+ AC_MSG_RESULT($median_module)
+ AM_CONDITIONAL(ENABLE_MEDIAN_MODULE, test "$median_module" = "yes")
+ 
++AC_MSG_CHECKING([whether mean modules is requested])
++AC_ARG_ENABLE(mean,
++	AS_HELP_STRING([--enable-mean],
++		[Enable building of mean filter (default=yes)]),
++	[mean_module=$enableval],
++	[mean_module=yes])
++AC_MSG_RESULT($mean_module)
++AM_CONDITIONAL(ENABLE_MEAN_MODULE, test "$mean_module" = "yes")
++
+ AC_MSG_CHECKING([whether dejitter module is requested]) 
+ AC_ARG_ENABLE(dejitter,
+ 	AS_HELP_STRING([--enable-dejitter],
+Index: tslib-1.0/etc/ts.conf
+===================================================================
+--- tslib-1.0.orig/etc/ts.conf
++++ tslib-1.0/etc/ts.conf
+@@ -22,6 +22,9 @@
+ # If your panel is giving spiky signal applying median filter might help.
+ # module median depth=5
+ 
++# Uncomment if you have +/-1 jitters
++# module mean depth=10
++
+ module pthres pmin=1
+ module variance delta=30
+ module dejitter delta=100
+Index: tslib-1.0/plugins/Makefile.am
+===================================================================
+--- tslib-1.0.orig/plugins/Makefile.am
++++ tslib-1.0/plugins/Makefile.am
+@@ -121,6 +121,12 @@ else
+ MEDIAN_MODULE =
+ endif
+ 
++if ENABLE_MEAN_MODULE
++MEAN_MODULE = mean.la
++else
++MEAN_MODULE =
++endif
++
+ if ENABLE_H2200_LINEAR_MODULE
+ H2200_LINEAR_MODULE = linear_h2200.la
+ else
+@@ -141,6 +147,7 @@ pluginexec_LTLIBRARIES = \
+ 	$(MK712_MODULE) \
+ 	$(ARCTIC2_MODULE) \
+ 	$(MEDIAN_MODULE) \
++	$(MEAN_MODULE) \
+ 	$(DMC_MODULE) \
+ 	$(H2200_LINEAR_MODULE) \
+ 	$(INPUT_MODULE) \
+@@ -164,6 +171,10 @@ median_la_SOURCES	= median.c
+ median_la_LDFLAGS	= -module $(LTVSN)
+ median_la_LIBADD	= $(top_builddir)/src/libts.la
+ 
++mean_la_SOURCES	= mean.c
++mean_la_LDFLAGS	= -module $(LTVSN)
++mean_la_LIBADD	= $(top_builddir)/src/libts.la
++
+ pthres_la_SOURCES	= pthres.c
+ pthres_la_LDFLAGS	= -module $(LTVSN)
+ 
+Index: tslib-1.0/plugins/mean.c
+===================================================================
+--- /dev/null
++++ tslib-1.0/plugins/mean.c
+@@ -0,0 +1,141 @@
++/*
++ *  tslib/plugins/median.c
++ *
++ *  Copyright (C) 2012 Garz & Fricke GmbH
++ *  Author Carsten behling <carsten.behling@garz-fricke.com>
++ *
++ * This file is placed under the LGPL.  Please see the file
++ * COPYING for more details.
++ *
++ * Mean filter incomming data
++ */
++
++#include <errno.h>
++#include <stdio.h>
++#include <limits.h>
++#include <string.h>
++#include <stdlib.h>
++
++#include "config.h"
++#include "tslib.h"
++#include "tslib-filter.h"
++
++struct tslib_mean {
++	struct tslib_module_info module;
++    unsigned int size;
++    struct ts_sample *fifo;
++    struct ts_sample sum;
++	unsigned int current;
++	unsigned int valid_samples;
++};
++
++static inline void mean_reset(struct tslib_mean *mean)
++{
++	mean->sum.x = 0;
++	mean->sum.y = 0;
++	mean->sum.pressure = 0;
++	mean->current = 0;
++	mean->valid_samples = 0;
++	memset(mean->fifo, 0, sizeof(struct ts_sample) * mean->size);
++}
++
++static int mean_read(struct tslib_module_info *info, struct ts_sample *samp, int nr)
++{
++	struct tslib_mean *mean = (struct tslib_mean *)info;
++    struct ts_sample *s = samp;
++    int ret = 0;
++	int processed = 0;
++	int i = 0;
++
++	ret = info->next->ops->read(info->next, samp, nr);
++    if( ret > 0 ) {
++		for(i = 0; i < ret; i++) {
++			if(samp->pressure == 0) { /* pen up */
++				mean_reset(mean);
++			} else {
++				if(mean->valid_samples >= mean->size) {
++					/* remove oldest sample from the sum */
++					mean->sum.x -= mean->fifo[mean->current].x;
++					mean->sum.y -= mean->fifo[mean->current].y;
++					mean->sum.pressure -= mean->fifo[mean->current].pressure;
++				}
++				mean->fifo[mean->current].x = samp[i].x;
++				mean->fifo[mean->current].y = samp[i].y;
++				mean->fifo[mean->current].pressure = samp[i].pressure;
++				/* add current sample to the sum */
++				mean->sum.x += samp[i].x;
++				mean->sum.y += samp[i].y;
++				mean->sum.pressure += samp[i].pressure;
++				if(mean->valid_samples < mean->size) {
++					mean->valid_samples++;
++					samp[i].x = mean->sum.x / mean->valid_samples;
++					samp[i].y = mean->sum.y / mean->valid_samples;
++					samp[i].pressure = mean->sum.pressure / mean->valid_samples;
++				} else {
++					samp[i].x = mean->sum.x / mean->size;
++					samp[i].y = mean->sum.y / mean->size;
++					samp[i].pressure = mean->sum.pressure / mean->size;
++				}
++				mean->current = (mean->current + 1) % mean->size;
++			}
++		}
++	}
++	return ret;
++}
++
++static int mean_fini(struct tslib_module_info *info)
++{
++	free(info);
++	return 0;
++}
++
++static const struct tslib_ops mean_ops =
++{
++	.read	= mean_read,
++	.fini	= mean_fini,
++};
++
++static int mean_depth(struct tslib_module_info *info, char *str, void *data __attribute__(( unused )) )
++{
++	struct tslib_mean *mean = (struct tslib_mean *)info;
++	unsigned long v;
++	int err = errno;
++
++	v = strtoul(str, NULL, 0);
++
++	if (v == ULONG_MAX && errno == ERANGE)
++		return -1;
++
++	errno = err;
++    mean->fifo = malloc(sizeof(struct ts_sample) *v);
++    mean->size = v;
++    mean_reset(mean);
++
++	return 0;
++}
++
++static const struct tslib_vars mean_vars[] =
++{
++	{ "depth",	(void *)1, mean_depth },
++};
++
++#define NR_VARS (sizeof(mean_vars) / sizeof(mean_vars[0]))
++
++TSAPI struct tslib_module_info *mod_init(struct tsdev *dev, const char *params)
++{
++	struct tslib_mean *mean;
++
++	mean = malloc(sizeof(struct tslib_mean));
++	if (mean == NULL)
++		return NULL;
++
++	memset(mean, 0, sizeof(struct tslib_mean));
++	mean->module.ops = &mean_ops;
++
++	if (tslib_parse_vars(&mean->module, mean_vars, NR_VARS, params)) {
++		free(mean);
++		return NULL;
++	}
++
++	return &mean->module;
++}

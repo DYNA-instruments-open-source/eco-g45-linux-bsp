@@ -1,0 +1,8 @@
+## SECTION=fixme
+
+config QT4_GUF_SLIDESHOW
+bool
+select QT4
+prompt "Garz & Fricke slideshow application"
+help
+  Garz & Fricke slideshow application.

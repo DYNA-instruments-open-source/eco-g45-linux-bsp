@@ -1,0 +1,202 @@
+Index: linux-2.6.39/Makefile
+===================================================================
+--- linux-2.6.39.orig/Makefile
++++ linux-2.6.39/Makefile
+@@ -545,8 +545,178 @@ all: vmlinux
+ ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
+ KBUILD_CFLAGS	+= -Os
+ else
++ifdef CONFIG_DEBUG_INFO_OPTIMIZATION
++# Carsten Behling 04.11.2011
++# I was not able to disable optimization with '-O0' for debugging.
++# So I turned on the smallest optimization option '-O1' that leads
++# to a compilable and running kernel. I tested disabling futher optimizations
++# separately that are enabled by '-O1' see gcc manual '3.10 Options That Control
++# Optimization' (gcc-4.3.2).
++# The following options cannot be disabled (lead to known compilation or runtime
++# errors):
++# - '-fno-dce' leads to a compilation error in (2.6.39) 'kernel/hrtimer.c' (dce: death code elimination)
++# - '-fno-if-conversion' 'fs/stat.c' eads to a compilation error in (2.6.39)
++# - '-fno-tree-dominator-opts' leads to several undefined refrences that(2.6.39): '__aeabi_uldivmod',
++#                              '__build_bug_on_failed', 'swapper_space'. May be '-O0' works with this
++#                              option enabled.
++# - '-fno-tree-ter' leads to several undefined refrences that(2.6.39): '__aeabi_uldivmod'
++#                   (seems to relate to '-fno-tree-dominator-opts')
++# - '-fno-unit-at-a-time' eads to a compilation error in (2.6.39): 'fs/block_dev.c' and 'fs/buffer.c'
++KBUILD_CFLAGS	+= -O1 \
++					-fno-auto-inc-dec \
++					-fno-cprop-registers \
++					-fno-defer-pop \
++					-fno-delayed-branch \
++					-fno-dse \
++					-fno-guess-branch-probability \
++					-fno-if-conversion2 \
++					-fno-ipa-pure-const \
++					-fno-ipa-reference	 \
++					-fno-merge-constants \
++					-fno-split-wide-types \
++					-fno-tree-ccp \
++					-fno-tree-ch \
++					-fno-tree-copyrename \
++					-fno-tree-dce \
++					-fno-tree-dse \
++					-fno-tree-fre \
++					-fno-tree-sra
++
++# The above options seem to be not all options that are the differences to '-O0'.
++# So I try out disabling further options enabled by '-O2'. Seems that thy do not change anything.
++KBUILD_CFLAGS	+= -fno-thread-jumps \
++					-fno-align-functions \
++					-fno-align-jumps \
++					-fno-align-loops \
++					-fno-align-labels \
++					-fno-caller-saves \
++					-fno-crossjumping \
++					-fno-cse-follow-jumps \
++					-fno-cse-skip-blocks \
++					-fno-delete-null-pointer-checks \
++					-fno-expensive-optimizations \
++					-fno-gcse \
++					-fno-gcse-lm \
++					-fno-optimize-sibling-calls \
++					-fno-peephole2 \
++					-fno-regmove \
++					-fno-reorder-blocks \
++					-fno-reorder-functions \
++					-fno-rerun-cse-after-loop \
++					-fno-sched-interblock \
++					-fno-sched-spec \
++					-fno-schedule-insns \
++					-fno-schedule-insns2 \
++					-fno-strict-aliasing \
++					-fno-strict-overflow \
++					-fno-tree-pre \
++					-fno-tree-vrp
++
++# ... '-O3'
++KBUILD_CFLAGS	+= -fno-inline-functions \
++					-fno-unswitch-loops \
++					-fno-predictive-commoning \
++					-fno-gcse-after-reload \
++					-fno-tree-vectorize
++
++# ... '-Os'
++KBUILD_CFLAGS	+= -fno-align-functions \
++					-fno-align-jumps \
++					-fno-align-loops \
++					-fno-align-labels \
++					-fno-reorder-blocks-and-partition \
++					-fno-prefetch-loop-arrays \
++					-fno-tree-vect-loop-version
++
++# ... some other:
++# '-fno-default-inline' is C++ only and gives a lot of warnings
++KBUILD_CFLAGS	+= -fno-forward-propagate \
++					-fno-omit-frame-pointer \
++					-fno-inline \
++					-fno-inline-small-functions \
++					-fno-inline-functions-called-once \
++					-fno-early-inlining \
++					-fno-keep-inline-functions \
++					-fno-keep-static-consts \
++					-fno-merge-constants \
++					-fno-merge-all-constants \
++					-fno-modulo-sched \
++					-fno-modulo-sched-allow-regmoves \
++					-fno-branch-count-reg \
++					-fno-function-cse \
++					-fno-zero-initialized-in-bss \
++					-fno-gcse-sm \
++					-fno-gcse-las \
++					-fno-unsafe-loop-optimizations \
++					-fno-crossjumping \
++					-fno-optimize-register-move \
++					-fno-sched-spec-load \
++					-fno-sched-spec-load-dangerous \
++					-fno-sched-stalled-insns \
++					-fno-sched-stalled-insns-dep \
++					-fno-sched2-use-superblocks \
++					-fno-sched2-use-traces \
++					-fno-see \
++					-fno-reschedule-modulo-scheduled-loops \
++					-fno-tree-reassoc \
++					-fno-tree-copy-prop \
++					-fno-tree-salias \
++					-fno-ipa-struct-reorg \
++					-fno-ipa-pta \
++					-fno-ipa-cp \
++					-fno-ipa-matrix-reorg \
++					-fno-tree-sink \
++					-fno-tree-store-ccp \
++					-fno-tree-loop-optimize \
++					-fno-tree-loop-linear \
++					-fno-check-data-deps \
++					-fno-tree-loop-im \
++					-fno-tree-loop-ivcanon \
++					-fno-ivopts \
++					-ftree-parallelize-loops=0	\
++					-fvect-cost-model \
++					-fno-tracer \
++					-fno-unroll-loops \
++					-fno-unroll-all-loops \
++					-fno-split-ivs-in-unroller \
++					-fno-variable-expansion-in-unroller \
++					-fno-peephole \
++					-fno-toplevel-reorder \
++					-fno-web \
++					-fno-whole-program \
++					-fno-profile-generate \
++					-fno-profile-use \
++					-fno-float-store \
++					-fno-fast-math \
++					-fno-math-errno \
++					-fno-unsafe-math-optimizations \
++					-fno-associative-math \
++					-fno-reciprocal-math \
++					-fno-finite-math-only \
++					-fno-signed-zeros \
++					-fno-trapping-math \
++					-fno-rounding-math \
++					-fno-rtl-abstract-sequences \
++					-fno-signaling-nans \
++					-fno-single-precision-constant \
++					-fno-cx-limited-range \
++					-fno-branch-probabilities \
++					-fno-profile-values \
++					-fno-vpt \
++					-fno-rename-registers \
++					-fno-peel-loops \
++					-fno-move-loop-invariants \
++					-fno-function-sections \
++					-fno-data-sections \
++					-fno-branch-target-load-optimize \
++					-fno-branch-target-load-optimize2 \
++					-fno-btr-bb-exclusive \
++					-fno-stack-protector \
++					-fno-section-anchors
++else
+ KBUILD_CFLAGS	+= -O2
+ endif
++endif
+ 
+ include $(srctree)/arch/$(SRCARCH)/Makefile
+ 
+Index: linux-2.6.39/lib/Kconfig.debug
+===================================================================
+--- linux-2.6.39.orig/lib/Kconfig.debug
++++ linux-2.6.39/lib/Kconfig.debug
+@@ -692,6 +692,14 @@ config DEBUG_INFO
+ 
+ 	  If unsure, say N.
+ 
++config DEBUG_INFO_OPTIMIZATION
++	bool "Debug with minimal compiler optimization"
++	depends on DEBUG_INFO && !CC_OPTIMIZE_FOR_SIZE
++	help
++	  If you say Y here the general optimization for compiling
++	  is -O1 with further optimization options disabled (Kernel cannot
++	  be compiled with -O0). Take al look at the Toplevel Makefile.
++
+ config DEBUG_INFO_REDUCED
+ 	bool "Reduce debugging information"
+ 	depends on DEBUG_INFO

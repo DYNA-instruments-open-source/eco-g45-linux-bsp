@@ -1,0 +1,48 @@
+Index: linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+===================================================================
+--- linux-2.6.33.orig/drivers/mtd/nand/mxc_nand.c
++++ linux-2.6.33/drivers/mtd/nand/mxc_nand.c
+@@ -103,6 +103,7 @@ struct mxc_nand_host {
+ 	void			*spare0;
+ 	void			*main_area0;
+ 	void			*main_area1;
++	void			*main_area3;
+ 
+ 	void __iomem		*base;
+ 	void __iomem		*regs;
+@@ -520,14 +521,14 @@ static void mxc_swap_2k_bi_main_sp(struc
+ 	u16 tmp1, tmp2, new_tmp1;
+ 
+ 	/* note: Only 16 bit accesses are allowed */
+-	tmp1 = readw(host->main_area0 + 2000);
+-	tmp2 = readw(host->main_area0 + 2052);
++	tmp1 = readw(host->main_area3 + 464);
++	tmp2 = readw(host->spare0 + 4);
+ 
+ 	new_tmp1 = (tmp1 & 0xFF00) | (tmp2 >> 8);
+ 	tmp2 = (tmp1 << 8) | (tmp2 & 0xFF);
+ 
+-	writew(new_tmp1, host->main_area0 + 2000);
+-	writew(tmp2, host->main_area0 + 2052);
++	writew(new_tmp1, host->main_area3 + 464);
++	writew(tmp2, host->spare0 + 4);
+ }
+ 
+ /*
+@@ -807,6 +808,7 @@ static int __init mxcnd_probe(struct pla
+ 
+ 	host->main_area0 = host->base;
+ 	host->main_area1 = host->base + 0x200;
++	host->main_area3 = host->base + 0x600;
+ 
+ 	if (nfc_is_v21()) {
+ 		host->regs = host->base + 0x1000;
+@@ -852,7 +854,7 @@ static int __init mxcnd_probe(struct pla
+ 	} else if (nfc_is_v1()) {
+ 		writew(0x0, host->regs + NFC_V1_UNLOCKSTART_BLKADDR);
+ 	        writew(0x4000, host->regs + NFC_V1_UNLOCKEND_BLKADDR);
+-		this->ecc.bytes = 3;
++		this->ecc.bytes = 5;
+ 	} else
+ 		BUG();
+ 

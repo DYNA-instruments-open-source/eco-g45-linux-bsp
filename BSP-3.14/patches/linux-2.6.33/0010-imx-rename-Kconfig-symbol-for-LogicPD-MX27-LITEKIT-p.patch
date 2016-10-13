@@ -1,0 +1,60 @@
+From 4eb241e4f4d26f1eba60ca6a438c4db9e83b3789 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Thu, 10 Dec 2009 10:25:07 +0100
+Subject: [PATCH 10/59] imx: rename Kconfig symbol for "LogicPD MX27 LITEKIT platform"
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Not using MACH_IMX27LITE makes machine_is_imx27lite always return 0
+independent of building support for this machine.
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Cc: Sascha Hauer <kernel@pengutronix.de>
+Cc: Russell King <linux@arm.linux.org.uk>
+Cc: Daniel Schaeffer <daniel.schaeffer@timesys.com>
+---
+ arch/arm/configs/mx27_defconfig |    2 +-
+ arch/arm/mach-mx2/Kconfig       |    2 +-
+ arch/arm/mach-mx2/Makefile      |    2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+Index: linux-2.6.33/arch/arm/configs/mx27_defconfig
+===================================================================
+--- linux-2.6.33.orig/arch/arm/configs/mx27_defconfig
++++ linux-2.6.33/arch/arm/configs/mx27_defconfig
+@@ -200,7 +200,7 @@ CONFIG_MACH_MX27ADS=y
+ CONFIG_MACH_PCM038=y
+ CONFIG_MACH_PCM970_BASEBOARD=y
+ CONFIG_MACH_MX27_3DS=y
+-CONFIG_MACH_MX27LITE=y
++CONFIG_MACH_IMX27LITE=y
+ CONFIG_MXC_IRQ_PRIOR=y
+ CONFIG_MXC_PWM=y
+ 
+Index: linux-2.6.33/arch/arm/mach-mx2/Kconfig
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Kconfig
++++ linux-2.6.33/arch/arm/mach-mx2/Kconfig
+@@ -90,7 +90,7 @@ config MACH_MX27_3DS
+ 	  Include support for MX27PDK platform. This includes specific
+ 	  configurations for the board and its peripherals.
+ 
+-config MACH_MX27LITE
++config MACH_IMX27LITE
+ 	bool "LogicPD MX27 LITEKIT platform"
+ 	depends on MACH_MX27
+ 	help
+Index: linux-2.6.33/arch/arm/mach-mx2/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Makefile
++++ linux-2.6.33/arch/arm/mach-mx2/Makefile
+@@ -16,7 +16,7 @@ obj-$(CONFIG_MACH_MX27ADS) += mx27ads.o
+ obj-$(CONFIG_MACH_PCM038) += pcm038.o
+ obj-$(CONFIG_MACH_PCM970_BASEBOARD) += pcm970-baseboard.o
+ obj-$(CONFIG_MACH_MX27_3DS) += mx27pdk.o
+-obj-$(CONFIG_MACH_MX27LITE) += mx27lite.o
++obj-$(CONFIG_MACH_IMX27LITE) += mx27lite.o
+ obj-$(CONFIG_MACH_CPUIMX27) += eukrea_cpuimx27.o
+ obj-$(CONFIG_MACH_EUKREA_MBIMX27_BASEBOARD) += eukrea_mbimx27-baseboard.o
+ obj-$(CONFIG_MACH_PCA100) += pca100.o

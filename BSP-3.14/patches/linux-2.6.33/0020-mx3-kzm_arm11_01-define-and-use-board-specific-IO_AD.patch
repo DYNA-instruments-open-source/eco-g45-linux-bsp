@@ -1,0 +1,51 @@
+From 225d563b8ead28ddc178e20a6ade3d12b3467161 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Wed, 16 Dec 2009 19:08:09 +0100
+Subject: [PATCH 20/59] mx3/kzm_arm11_01: define and use board specific IO_ADDRESS macro
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+Cc: Sascha Hauer <kernel@pengutronix.de>
+Cc: Russell King <linux@arm.linux.org.uk>
+---
+ arch/arm/mach-mx3/mach-kzm_arm11_01.c |   11 ++++++++---
+ 1 files changed, 8 insertions(+), 3 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx3/mach-kzm_arm11_01.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mach-kzm_arm11_01.c
++++ linux-2.6.33/arch/arm/mach-mx3/mach-kzm_arm11_01.c
+@@ -46,13 +46,18 @@
+ 
+ #include "devices.h"
+ 
++#define KZM_ARM11_IO_ADDRESS(x) (					\
++	IMX_IO_ADDRESS(x, MX31_CS4) ?:					\
++	IMX_IO_ADDRESS(x, MX31_CS5) ?:					\
++	MX31_IO_ADDRESS(x))
++
+ #if defined(CONFIG_SERIAL_8250) || defined(CONFIG_SERIAL_8250_MODULE)
+ /*
+  * KZM-ARM11-01 has an external UART on FPGA
+  */
+ static struct plat_serial8250_port serial_platform_data[] = {
+ 	{
+-		.membase	= IO_ADDRESS(KZM_ARM11_16550),
++		.membase	= KZM_ARM11_IO_ADDRESS(KZM_ARM11_16550),
+ 		.mapbase	= KZM_ARM11_16550,
+ 		.irq		= IOMUX_TO_IRQ(MX31_PIN_GPIO1_1),
+ 		.irqflags	= IRQ_TYPE_EDGE_RISING,
+@@ -102,9 +107,9 @@ static int __init kzm_init_ext_uart(void
+ 	/*
+ 	 * Unmask UART interrupt
+ 	 */
+-	tmp = __raw_readb(IO_ADDRESS(KZM_ARM11_CTL1));
++	tmp = __raw_readb(KZM_ARM11_IO_ADDRESS(KZM_ARM11_CTL1));
+ 	tmp |= 0x2;
+-	__raw_writeb(tmp, IO_ADDRESS(KZM_ARM11_CTL1));
++	__raw_writeb(tmp, KZM_ARM11_IO_ADDRESS(KZM_ARM11_CTL1));
+ 
+ 	return platform_device_register(&serial_device);
+ }

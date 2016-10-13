@@ -1,0 +1,1202 @@
+Index: linux-2.6.33/arch/arm/mach-mx25/mach-guf_nesolt.c
+===================================================================
+--- /dev/null
++++ linux-2.6.33/arch/arm/mach-mx25/mach-guf_nesolt.c
+@@ -0,0 +1,988 @@
++/*
++ * Copyright 2010 Tim Jaacks, <tim.jaacks@garz-fricke.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor,
++ * Boston, MA  02110-1301, USA.
++ */
++
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/irq.h>
++#include <linux/gpio.h>
++#include <linux/platform_device.h>
++#include <linux/mtd/mtd.h>
++#include <linux/etherdevice.h>
++#include <video/platform_lcd.h>
++#include <linux/pwm_backlight.h>
++#include <linux/fsl_devices.h>
++#include <linux/i2c.h>
++#include <linux/i2c/at24.h>
++
++#include <mach/hardware.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/time.h>
++#include <asm/memory.h>
++#include <asm/mach/map.h>
++#include <mach/common.h>
++#include <mach/imx-uart.h>
++#include <mach/mx25.h>
++#include <mach/mxc_nand.h>
++#include <mach/imxfb.h>
++#include "devices.h"
++#include <mach/iomux.h>
++#include <mach/esdhc.h>
++#include <mach/mxc_ehci.h>
++#include <mach/i2c.h>
++#include <mach/gfeeprom.h>
++#include <mach/ssi.h>
++#include <mach/audmux.h>
++
++#include <linux/ezxml.h>
++#include <linux/string.h>
++#include <linux/vmalloc.h>
++#include <linux/can/platform/flexcan.h>
++#include <linux/input/pinnacle_ts.h>
++#include <linux/guf_xml_config.h>
++#include <linux/guf_board_common.h>
++
++#define MINIMUM_REDBOOT_VERSION "1.16r2757"
++
++static guf_xml_data_private_t config;
++
++
++/******************************************************************************/
++/* GPIO DEFINES                                                               */
++/******************************************************************************/
++
++/* two pins are controlling the PWR signals to the USB phys */
++#define USBH_PWR		(1 * 32 + 6)
++#define USBOTG_PWR		(1 * 32 + 7)
++
++/* two pins are controlling the display */
++#define LCD_ENA			(1 * 32 + 2)
++#define LCD_SIG_EN		(3 * 32 + 0)
++
++/* RS485 */
++#define RS485_TX_EN 	(1 * 32 + 1)
++
++/* Audio pins */
++#define CS4265_RESET	(1 * 32 + 5)
++
++/* External touch interrupt line */
++#define TOUCH_INT		(3 * 32 + 4)
++/* External touch reset line */
++#define TOUCH_RESET		(3 * 32 + 3)
++/* External touch I2C lines */
++#define TOUCH_SCL		(0 * 32 + 4)
++#define TOUCH_SDA		(0 * 32 + 17)
++
++/* GPIO on power connector (X1) */
++#define DIO_OUT			(1 * 32 + 0)
++
++/* GPIOs on keypad connector (X16) */
++#define KP_ROW0 (3 * 32 + 26)		// Pin 3
++#define KP_COL0 (2 * 32 + 3)		// Pin 4
++#define KP_ROW1 (1 * 32 + 20)		// Pin 5
++#define KP_COL1 (2 * 32 + 4)		// Pin 6
++#define KP_ROW2 (2 * 32 + 17)		// Pin 7
++#define KP_COL2 (0 * 32 + 5)		// Pin 8
++#define KP_ROW3 (2 * 32 + 0)		// Pin 9
++#define KP_COL3 (2 * 32 + 15)		// Pin 10
++#define KP_ROW4 (1 * 32 + 31)		// Pin 11
++#define KP_COL4 (2 * 32 + 16)		// Pin 12
++#define KP_ROW5_DMA (0 * 32 + 30)	// Pin 13
++#define KP_COL5_SS1 (3 * 32 + 21)	// Pin 14
++#define KP_ROW6_MISO (0 * 32 + 28)	// Pin 15
++#define KP_COL6_MOSI (0 * 32 + 27)	// Pin 16
++#define KP_ROW7_SLK (0 * 32 + 29)	// Pin 17
++#define KP_COL7_SS0 (0 * 32 + 7)	// Pin 18
++
++/******************************************************************************/
++/* PIN MULTIPLEXING                                                           */
++/******************************************************************************/
++static struct pad_desc guf_nesolt_pads[] = {
++	/* UART1 */
++	MX25_PAD_UART1_RXD__UART1_RXD,
++	MX25_PAD_UART1_TXD__UART1_TXD,
++	MX25_PAD_UART1_RTS__UART1_RTS,
++	MX25_PAD_UART1_CTS__UART1_CTS,
++
++	/* UART3 */
++	MX25_PAD_KPP_ROW0__UART3_RXD,
++	MX25_PAD_KPP_ROW1__UART3_TXD,
++	MX25_PAD_A15__GPIO_2_1,
++
++	/* FEC */
++	MX25_PAD_FEC_MDC__FEC_MDC,
++	MX25_PAD_FEC_MDIO__FEC_MDIO,
++	MX25_PAD_FEC_TX_EN__FEC_TX_EN,
++	MX25_PAD_FEC_RX_DV__FEC_RX_DV,
++	MX25_PAD_FEC_TX_CLK__FEC_TX_CLK,
++	MX25_PAD_SD1_DATA2__FEC_RX_CLK,
++	MX25_PAD_SD1_DATA3__FEC_CRS,
++	MX25_PAD_UART2_RTS__FEC_COL,
++	MX25_PAD_UART2_CTS__FEC_RX_ER,
++	MX25_PAD_UART2_TXD__FEC_TX_ERR,
++	MX25_PAD_FEC_RDATA0__FEC_RDATA0,
++	MX25_PAD_FEC_RDATA1__FEC_RDATA1,
++	MX25_PAD_SD1_CMD__FEC_RDATA2,
++	MX25_PAD_SD1_CLK__FEC_RDATA3,
++	MX25_PAD_FEC_TDATA0__FEC_TDATA0,
++	MX25_PAD_FEC_TDATA1__FEC_TDATA1,
++	MX25_PAD_SD1_DATA0__FEC_TDATA2,
++	MX25_PAD_SD1_DATA1__FEC_TDATA3,
++
++	/* I2C1 */
++	MX25_PAD_I2C1_CLK__I2C1_CLK,
++	MX25_PAD_I2C1_DAT__I2C1_DAT,
++
++	/* I2C2 */
++	MX25_PAD_GPIO_C__I2C2_CLK,
++	MX25_PAD_GPIO_D__I2C_DAT,
++
++	/* I2C3 */
++	MX25_PAD_GPIO_E__I2C3_CLK,
++	MX25_PAD_CSPI1_SS1__I2C3_DAT,
++
++	/* External Touch */
++	MX25_PAD_CS1__GPIO_4_3, 			// TOUCH_RESET
++	MX25_PAD_BCLK__GPIO_4_4, 			// TOUCH_INT
++
++	/* LCD */
++	MX25_PAD_LD0__LD0,
++	MX25_PAD_LD1__LD1,
++	MX25_PAD_LD2__LD2,
++	MX25_PAD_LD3__LD3,
++	MX25_PAD_LD4__LD4,
++	MX25_PAD_LD5__LD5,
++	MX25_PAD_LD6__LD6,
++	MX25_PAD_LD7__LD7,
++	MX25_PAD_LD8__LD8,
++	MX25_PAD_LD9__LD9,
++	MX25_PAD_LD10__LD10,
++	MX25_PAD_LD11__LD11,
++	MX25_PAD_LD12__LD12,
++	MX25_PAD_LD13__LD13,
++	MX25_PAD_LD14__LD14,
++	MX25_PAD_LD15__LD15,
++	MX25_PAD_D15__LD16,
++	MX25_PAD_D14__LD17,
++	MX25_PAD_D13__LD18,
++	MX25_PAD_D12__LD19,
++	MX25_PAD_D11__LD20,
++	MX25_PAD_D10__LD21,
++	MX25_PAD_D9__LD22,
++	MX25_PAD_D8__LD23,
++	MX25_PAD_HSYNC__HSYNC,
++	MX25_PAD_VSYNC__VSYNC,
++	MX25_PAD_LSCLK__LSCLK,
++	MX25_PAD_OE_ACD__OE_ACD,
++	MX25_PAD_A16__GPIO_2_2,			/* LCD enable */
++	MX25_PAD_A10__GPIO_4_0,			/* LCD signals enable */
++	MX25_PAD_PWM__PWM,				/* LCD backligtht PWM */
++
++	/* ESDHC2 */
++	MX25_PAD_CSI_D7__ESDHC2_CLK,
++	MX25_PAD_CSI_D6__ESDHC2_CMD,
++	MX25_PAD_CSI_MCLK__ESDHC2_DAT0,
++	MX25_PAD_CSI_VSYNC__ESDHC2_DAT1,
++	MX25_PAD_CSI_HSYNC__ESDHC2_DAT2,
++	MX25_PAD_CSI_PIXCLK__ESDHC_DAT3,
++
++	/* USB Host*/
++	MX25_PAD_A20__GPIO_2_6,			/* USB Host PWR */
++	MX25_PAD_A23__GPIO_2_9,			/* USB Host Overcurrent */
++
++	/* USB OTG */
++	MX25_PAD_A21__GPIO_2_7,			/* USB OTG PWR */
++	MX25_PAD_A24__GPIO_2_10,		/* USB OTG Overcurrent */
++
++	/* CAN */
++	MX25_PAD_GPIO_B__CAN1_RX,
++	MX25_PAD_GPIO_A__CAN1_TX,
++
++	/* I2S */
++	MX25_PAD_RW__AUD4_TXFS,
++	MX25_PAD_OE__AUD4_TXC,
++	MX25_PAD_EB1__AUD4_RXD,
++	MX25_PAD_EB0__AUD4_TXD,
++	MX25_PAD_CLKO__CLKO,			// MCLK
++
++	/* CS4265 Reset */
++	MX25_PAD_A19__GPIO_2_5,			// CS4265_RESET
++
++	/* GPIO Power Connector */
++	MX25_PAD_A14__GPIO_2_0,
++
++	/* GPIOs Keypad */
++	MX25_PAD_UART2_RXD__GPIO_4_26,
++	MX25_PAD_KPP_COL2__GPIO_3_3,
++	MX25_PAD_DE_B__GPIO_2_20,
++	MX25_PAD_KPP_COL3__GPIO_3_4,
++	MX25_PAD_VSTBY_REQ__GPIO_3_17,
++	MX25_PAD_GPIO_F__GPIO_F,
++	MX25_PAD_KPP_ROW3__GPIO_3_0,
++	MX25_PAD_EXT_ARMCLK__GPIO_3_15,
++	MX25_PAD_KPP_ROW2__GPIO_2_31,
++	MX25_PAD_UPLL_BYPCLK__GPIO_3_16,
++	MX25_PAD_CSI_D5__GPIO_1_30,
++	MX25_PAD_CSI_D9__GPIO_4_21,
++	MX25_PAD_CSI_D3__GPIO_1_28,
++	MX25_PAD_CSI_D2__GPIO_1_27,
++	MX25_PAD_CSI_D4__GPIO_1_29,
++	MX25_PAD_CSI_D8__GPIO_1_7,
++};
++
++
++/******************************************************************************/
++/* SERIAL                                                                     */
++/******************************************************************************/
++static struct imxuart_platform_data guf_nesolt_uart_pdata = {
++	.flags = IMXUART_HAVE_RTSCTS,
++};
++
++void guf_nesolt_rs485_tx_enable (int enable)
++{
++	gpio_set_value(RS485_TX_EN, enable);
++}
++
++static struct imxuart_platform_data guf_nesolt_rs485_pdata = {
++	.flags = IMXUART_RS485,
++	.rs485_tx_enable = guf_nesolt_rs485_tx_enable,
++};
++
++/******************************************************************************/
++/* LCD POWER                                                                  */
++/******************************************************************************/
++static void guf_nesolt_lcd_power_control(struct plat_lcd_data *pd, unsigned int power)
++{
++	if (power != 0)
++	{
++		gpio_set_value(LCD_ENA, 1);		/* on */
++		gpio_set_value(LCD_SIG_EN, 1);	/* on */
++	}
++	else
++	{
++		gpio_set_value(LCD_ENA, 0);		/* off */
++		gpio_set_value(LCD_SIG_EN, 0);	/* off */
++	}
++}
++
++static struct plat_lcd_data guf_nesolt_lcd_power_info = {
++	.set_power = guf_nesolt_lcd_power_control,
++	.match_fb = NULL,	/* FIXME */
++};
++
++static struct platform_device guf_nesolt_lcd_power = {
++	.name	= "platform-lcd",
++	.id	= -1,
++	.dev	= {
++		.platform_data	= &guf_nesolt_lcd_power_info,
++	},
++};
++
++/******************************************************************************/
++/* BACKLIGHT                                                                  */
++/******************************************************************************/
++static struct platform_pwm_backlight_data guf_nesolt_backlight_info = {
++	.pwm_id = 0,
++	.max_brightness = 255,
++	.dft_brightness = 255,
++	.pwm_period_ns = 0x3D0900,
++	.lut = 0,
++};
++
++static struct platform_device guf_nesolt_backlight_power = {
++	.name	= "pwm-backlight",
++	.id	= -1,
++	.dev	= {
++		.parent = &mxc_pwm_device0.dev,
++		.platform_data	= &guf_nesolt_backlight_info,
++	},
++};
++
++static void guf_nesolt_setup_backlight_from_guf_xml(void)
++{
++	/* default brightness */
++	guf_nesolt_backlight_info.dft_brightness = config.backlight.level_ac;
++	/* configure backlight */
++	guf_nesolt_backlight_info.lut = config.backlight.lut; // set look-up table
++	guf_nesolt_backlight_info.dft_brightness = config.backlight.level_ac; // set level
++}
++
++/******************************************************************************/
++/* VIDEO                                                                      */
++/******************************************************************************/
++static struct imx_fb_videomode guf_nesolt_fb_mode;
++
++static struct imx_fb_platform_data guf_nesolt_fb_data = {
++	.mode = &guf_nesolt_fb_mode,
++	.num_modes = 1,
++	.dmacr = 0x00020010,
++	.backlight_dev = &guf_nesolt_backlight_power.dev,
++	.lcd_dev = &guf_nesolt_lcd_power.dev,
++};
++
++static uint32_t fixed_screen_address;
++static uint32_t fixed_screen_size;
++
++static int __init guf_nesolt_fixed_screen(char *options)
++{
++	int display_enabled;
++
++	if (sscanf(options, "%d,%x,%x", &display_enabled, &fixed_screen_address, &fixed_screen_size) != 3) {
++		pr_err("NESO LT platform: wrong vidmem parameter syntax. Ignoring.\n");
++		fixed_screen_address = 0U;	/* to be sure */
++		return 0;
++	}
++	/* nothing shown yet? e.g. no splash screen */
++	if (display_enabled == 0)
++		/* do not use any hard coded framebuffer address in this case */
++		fixed_screen_address = 0U;
++	else
++		pr_info("NESO LT platform: Using fixed framebuffer memory at %x\n",
++			fixed_screen_address);
++
++	return 0;
++}
++__setup("vidmem=", guf_nesolt_fixed_screen);
++
++static void guf_nesolt_setup_fb_videomode_from_guf_xml(void)
++{
++	/* configure framebuffer device */
++	guf_nesolt_fb_mode.mode.name = config.display.name;
++	guf_nesolt_fb_mode.mode.xres = config.display.xres;
++	guf_nesolt_fb_mode.mode.yres = config.display.yres;
++	if (config.display.pix_clk == 0) {
++		guf_nesolt_fb_mode.mode.pixclock = (config.display.xres + config.hsync.start_width \
++				+ config.hsync.width + config.hsync.end_width) \
++				* (config.display.yres + config.vsync.start_width + config.vsync.width \
++				+ config.vsync.end_width) * config.display.refresh / 1000;
++	} else {
++		guf_nesolt_fb_mode.mode.pixclock = config.display.pix_clk / 1000;
++	}
++	guf_nesolt_fb_mode.mode.hsync_len = config.hsync.width;
++	guf_nesolt_fb_mode.mode.left_margin = config.hsync.start_width;
++	guf_nesolt_fb_mode.mode.right_margin = config.hsync.end_width;
++	guf_nesolt_fb_mode.mode.vsync_len = config.vsync.width;
++	guf_nesolt_fb_mode.mode.upper_margin = config.vsync.start_width;
++	guf_nesolt_fb_mode.mode.lower_margin = config.vsync.end_width;
++
++	guf_nesolt_fb_mode.bpp = config.format.depth;
++
++	if (config.format.depth == 32)
++	{
++		// Bpp 24bit and 18bit get delivered as 32bit, so
++		// we have to seperate here
++		if(config.format.pixelformat == FORMAT_PIXEL_RGB666)
++			guf_nesolt_fb_mode.bpp_used = 18;
++		else if (config.format.pixelformat == FORMAT_PIXEL_RGB24)
++			guf_nesolt_fb_mode.bpp_used = 24;
++		else
++			guf_nesolt_fb_mode.bpp_used = 32;
++	}
++	else
++		guf_nesolt_fb_mode.bpp_used = config.format.depth;
++
++	/* change the interpratation of "polarity" and "select_enable" dependent
++	   on "original_dc" */
++	if (config.display.original_dc != NULL)
++	{
++		if (!strcmp(config.display.original_dc, "IPU")) {
++			/* IPU compared to CLCDC uses inverted clock.select_enable and clock.polarity */
++			config.clock.select_enable = (config.clock.select_enable == 0);
++			config.clock.polarity = (config.clock.polarity == 0);
++		}
++	}
++	else
++	{
++		printk("Your display settings are outdated, please update. System halted.\n");
++		while(1);
++	}
++	/* construct Value for PCR */
++	guf_nesolt_fb_mode.pcr = (config.clock.select_enable ? PCR_SCLK_SEL : 0) |
++		(config.clock.idle_enable ? PCR_SCLKIDLE : 0) |
++		(config.data.oe_polarity ? 0 : PCR_OEPOL ) |
++		(config.clock.polarity ? PCR_CLKPOL : 0) |
++		(config.hsync.polarity ? PCR_LPPOL : 0) |
++		(config.vsync.polarity ? PCR_FLMPOL : 0) |
++		(config.data.polarity ? PCR_PIXPOL : 0) |
++		PCR_COLOR | PCR_TFT; /* using TFT-Display */
++
++	/* If the bootloader provides a framebuffer, we will continue using it */
++	if (fixed_screen_address != 0U) {
++		request_mem_region(fixed_screen_address,
++					fixed_screen_size, "mx3_sdc_fb");
++		guf_nesolt_fb_data.fixed_screen_cpu = ioremap(fixed_screen_address, fixed_screen_size);
++		guf_nesolt_fb_data.fixed_screen_dma = fixed_screen_address;
++	}
++
++	/* Set up the display power sequence */
++	guf_nesolt_fb_data.poweron_to_signalon = config.powerseq.poweron_to_signalon;
++	guf_nesolt_fb_data.poweron_to_backlighton = config.powerseq.poweron_to_backlighton;
++	guf_nesolt_fb_data.backlightoff_before_poweroff = config.powerseq.backlightoff_before_poweroff;
++	guf_nesolt_fb_data.signaloff_before_poweroff = config.powerseq.signaloff_before_poweroff;
++	guf_nesolt_fb_data.poweroff_to_poweron = config.powerseq.poweroff_to_poweron;
++
++	/* register this framebuffer */
++	mxc_register_device(&mx25_fb_device, &guf_nesolt_fb_data);
++
++#ifdef CONFIG_FRAMEBUFFER_CONSOLE
++	/* Adjust frambuffer console rotation */
++	switch (config.rotation.angle)
++	{
++		default:
++		case ROTATION_0:
++			fbcon_change_rotation(2);
++		case ROTATION_90:
++			fbcon_change_rotation(3);
++		case ROTATION_180:
++			fbcon_change_rotation(0);
++		case ROTATION_270:
++			fbcon_change_rotation(1);
++	}
++#endif
++}
++
++/******************************************************************************/
++/* I2C / EEPROM / RTC                                                         */
++/******************************************************************************/
++static struct imxi2c_platform_data guf_nesolt_i2c_1_pdata = {
++	.bitrate = 100000,
++};
++
++static struct guf_eeprom_memory_accessor gl_eeprom_acc;
++static void guf_nesolt_eeprom_setup(struct memory_accessor *mem_acc, void *context)
++{
++	gl_eeprom_acc.mem_acc.read = mem_acc->read;
++	gl_eeprom_acc.mem_acc.write = mem_acc->write;
++	gl_eeprom_acc.cont = context;
++}
++
++static struct gfeeprom_platform_data guf_nesolt_eeprom_pdata = {
++	.byte_len = (1 << 12),
++	.page_size = 0x20,
++	.flags = AT24_FLAG_ADDR16,
++	.bus_id = 0,
++	.context = &(guf_nesolt_eeprom_pdata.bus_id),
++	.setup = guf_nesolt_eeprom_setup,
++};
++
++static struct i2c_board_info guf_nesolt_i2c_1_devices[] = {
++    {
++		I2C_BOARD_INFO("gfeeprom", GF_GLOBAL_PLATFORM_EEPROM_ADDRESS), /* E0=0, E1=0, E2=0 */
++		.platform_data = &guf_nesolt_eeprom_pdata,
++	},
++	{
++		I2C_BOARD_INFO("pcf8563", 0x51),
++	}
++};
++
++static struct imxi2c_platform_data guf_nesolt_i2c_2_pdata = {
++	.bitrate = 100000,
++};
++
++static struct i2c_board_info guf_nesolt_i2c_2_devices[] = {
++	{
++		I2C_BOARD_INFO("cs4265", 0x4f),
++	}
++};
++
++static struct imxi2c_platform_data guf_nesolt_i2c_3_pdata = {
++	.bitrate = 100000,
++};
++
++/******************************************************************************/
++/* TOUCHSCREEN                                                                */
++/******************************************************************************/
++static bool guf_nesolt_pinnacle_reset(void)
++{
++	struct pad_desc pad_i2c_sda_gpio = MX25_PAD_CSPI1_SS1__GPIO_1_17;
++	struct pad_desc pad_i2c_scl_gpio = MX25_PAD_GPIO_E__GPIO_E;
++	struct pad_desc pad_i2c_sda_i2c = MX25_PAD_CSPI1_SS1__I2C3_DAT;
++	struct pad_desc pad_i2c_scl_i2c = MX25_PAD_GPIO_E__I2C3_CLK;
++
++	mxc_iomux_v3_setup_pad(&pad_i2c_sda_gpio);
++	mxc_iomux_v3_setup_pad(&pad_i2c_scl_gpio);
++	// switching off the pinnacle until we open the touch driver.
++	gpio_request(TOUCH_SDA, "i2c_sda");
++	gpio_direction_output(TOUCH_SDA, 0);
++	gpio_request(TOUCH_SCL, "i2c_scl");
++	gpio_direction_output(TOUCH_SCL, 0);
++	gpio_set_value(TOUCH_RESET, 1);
++	msleep(100);
++	gpio_set_value(TOUCH_RESET, 0);
++	msleep(50);
++
++	// done with reset configure the I2C pins for controller usage.
++	gpio_free(TOUCH_SDA);
++	gpio_free(TOUCH_SCL);
++	mxc_iomux_v3_setup_pad(&pad_i2c_sda_i2c);
++	mxc_iomux_v3_setup_pad(&pad_i2c_scl_i2c);
++	return true;
++};
++
++static struct gufpinnacle_platform_data guf_nesolt_pinnacle_pdata = {
++	.gufpinnacle_reset = guf_nesolt_pinnacle_reset,
++	.irq_flags = IRQF_TRIGGER_LOW,
++	.gpio_int_number = TOUCH_INT
++};
++
++static struct i2c_board_info guf_nesolt_touch_pinnacle_info = {
++	I2C_BOARD_INFO("pinnacle_ts", 0x2A),
++	.platform_data = &guf_nesolt_pinnacle_pdata,
++	.irq = gpio_to_irq(TOUCH_INT),
++};
++
++static void guf_nesolt_init_touch_driver(guf_xml_data_touch_t touch)
++{
++	switch(touch) {
++	case TOUCH_PINNACLE:
++		i2c_new_device(i2c_get_adapter(2), &guf_nesolt_touch_pinnacle_info);
++		break;
++	case TOUCH_IMX_ADC:
++		platform_device_register(&mx25_adc_device);
++		break;
++	default:
++		printk("Warning: Selected touch not supported on this platform\n");
++	case TOUCH_NONE:
++		printk("Booting kernel without touch support\n");
++	}
++}
++
++/******************************************************************************/
++/* AUDIO                                                                      */
++/******************************************************************************/
++static struct imx_ssi_platform_data guf_nesolt_ssi_pdata = {
++	.flags = IMX_SSI_SYN | IMX_SSI_NET | IMX_SSI_USE_I2S_SLAVE,
++};
++
++/******************************************************************************/
++/* USB                                                                        */
++/******************************************************************************/
++static int guf_nesolt_usbh2_phy_init(struct platform_device *pdev)
++{
++	int ret = 0;
++
++	ret = gpio_request(USBH_PWR, "USB");
++	if (ret)
++		goto usb_out;
++
++	gpio_direction_output(USBH_PWR, 1);
++	udelay(10);
++	gpio_set_value(USBH_PWR, 1);
++
++usb_out:
++	if (ret)
++		printk(KERN_WARNING "%s failed with %d\n", __func__, ret);
++	return ret;
++}
++
++static struct mxc_usbh_platform_data guf_nesolt_usbh2_pdata = {
++	.init = guf_nesolt_usbh2_phy_init,
++	.portsc = MXC_EHCI_MODE_SERIAL,
++	.flags = MXC_EHCI_INTERNAL_PHY | MXC_EHCI_IPPUE_DOWN,
++};
++
++static struct fsl_usb2_platform_data guf_nesolt_otg_device_pdata = {
++	.operating_mode = FSL_USB2_DR_OTG,
++	.phy_mode       = FSL_USB2_PHY_UTMI,
++};
++
++/******************************************************************************/
++/* CAN                                                                        */
++/******************************************************************************/
++static struct flexcan_platform_data guf_nesolt_flexcan1_pdata = {
++	 .core_reg = NULL,
++	 .io_reg = NULL,
++	 .xcvr_enable = NULL,
++	 .active = NULL,
++	 .inactive = NULL
++};
++
++/******************************************************************************/
++/* ETHERNET                                                                   */
++/******************************************************************************/
++static int guf_nesolt_handle_netdev_event (struct notifier_block *block,
++					 unsigned long event,
++					 void *ptr)
++{
++	struct net_device *dev = ptr;
++	int i;
++
++	if(strcmp(dev->name, "eth0"))
++		goto out;
++
++	if(event == NETDEV_REGISTER && is_valid_ether_addr(config.mac_addr.sa_data)) {
++		for(i = 0; i < 6; i++) {
++			dev->dev_addr[i] = config.mac_addr.sa_data[i];
++		}
++		config.mac_addr.sa_family = dev->type;
++		dev_set_mac_address(dev, &config.mac_addr);
++	}
++out:
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block guf_nesolt_netdev_event = {
++	.notifier_call = guf_nesolt_handle_netdev_event,
++};
++
++/******************************************************************************/
++/* Platform Devices                                                           */
++/******************************************************************************/
++static struct platform_device *platform_devices[] = {
++	&mx25_fec_device,
++};
++
++static struct platform_device *display_devices[] = {
++	&mxc_pwm_device0,
++	&guf_nesolt_lcd_power,
++	&guf_nesolt_backlight_power,
++};
++
++/******************************************************************************/
++/* FLASH                                                                      */
++/******************************************************************************/
++static struct mxc_nand_platform_data guf_nesolt_nand_pdata = {
++	.width = 1,
++	.hw_ecc = 1,
++};
++
++static struct guf_xml_device_platform_data guf_xml_device_pdata = {
++	.mtd_fis_directory = NULL,
++	.mtd_redundant_fis = NULL,
++};
++
++static int guf_xml_device_registered = 0;
++
++/*
++ * some devices will be configured at runtime by XML data from NAND
++ * So, we must wait for the NAND to occur
++ */
++static void guf_nesolt_flash_add(struct mtd_info *mtd)
++{
++	char *buf = NULL;
++	size_t retlen;
++	int ret = 0;
++	struct ezxml *xml_cfg = NULL;
++
++	/* First, check RedBoot version */
++	if (strcmp(mtd->name, "RedBoot") == 0)
++	{
++		ret = guf_check_redboot_compatibility(MINIMUM_REDBOOT_VERSION);
++		if (ret == -EINVAL)
++			printk("WARNING: Could not determine required RedBoot version\n");
++		else if (ret != 0) {
++			printk("System halted.\n");
++			while(1);
++		}
++	}
++
++	/* Initialize guf_xml driver */
++	if (strncmp(NAME_FIS_DIRECTORY, mtd->name, LENGTH_NAME_FIS_DIRECTORY) == 0) {
++		printk("guf_xml: found partition %s\n", mtd->name);
++		guf_xml_device_pdata.mtd_fis_directory = mtd;
++	}
++
++	if (strncmp(NAME_REDUNDANT_FIS, mtd->name, LENGTH_NAME_REDUNDANT_FIS) == 0) {
++		printk("guf_xml: found partition %s\n", mtd->name);
++		guf_xml_device_pdata.mtd_redundant_fis = mtd;
++	}
++
++	if (guf_xml_device_pdata.mtd_fis_directory && guf_xml_device_pdata.mtd_redundant_fis && !guf_xml_device_registered) {
++		guf_xml_device.dev.platform_data = &guf_xml_device_pdata;
++		platform_device_register(&guf_xml_device);
++		guf_xml_device_registered = 1;
++	}
++
++	/* Read XML configuration */
++	if (strcmp(mtd->name, "Redundant FIS (ACTIVE)") == 0 ||
++	    strcmp(mtd->name, "FIS directory (ACTIVE)") == 0) {
++		buf = vmalloc(mtd->size);
++
++		mtd->read(mtd, 0, mtd->size, &retlen, (void*) buf);
++		if (ret || (retlen != mtd->size)) {
++			printk("Error reading config partition\n");
++			goto error;
++		}
++		xml_cfg = guf_get_config(buf);
++		if (xml_cfg == 0)
++			goto error;
++
++		if (get_machine_configuration(xml_cfg, &config) == 0)
++		{
++			/* Now register a netdev_notifier to set the mac address */
++			if (is_valid_ether_addr(config.mac_addr.sa_data))
++				register_netdevice_notifier(&guf_nesolt_netdev_event);
++			/* register the remaining devices */
++			platform_add_devices(platform_devices, ARRAY_SIZE(platform_devices));
++		}
++		else
++			goto error;
++
++		if (get_display_configuration(xml_cfg, &config) == 0)
++		{
++			/* init framebuffer from XML data */
++			guf_nesolt_setup_fb_videomode_from_guf_xml();
++			/* init pwm backlight from XML data */
++			guf_nesolt_setup_backlight_from_guf_xml();
++			/* Request LCD_ENA */
++			gpio_request(LCD_ENA, "FB");
++			/* Request LCD_ENA */
++			gpio_request(LCD_SIG_EN, "FB");
++			/* register all display-related devices (now backlight level is set)*/
++			platform_add_devices(display_devices, ARRAY_SIZE(display_devices));
++		}
++		else
++			printk("Booting kernel without display support\n");
++
++		get_touch_configuration(xml_cfg, &config);
++		guf_nesolt_init_touch_driver(config.touch);
++
++		guf_free_config(xml_cfg);
++		vfree(buf);
++	}
++	return;
++
++error:
++	printk("Machine configuration data is missing in flash memory. System halted.\n");
++	while(1);
++}
++
++static void guf_nesolt_flash_remove(struct mtd_info *mtd)
++{
++	/* nothing to do here */
++}
++
++static struct mtd_notifier guf_nesolt_flash_notifier = {
++	.add = guf_nesolt_flash_add,
++	.remove = guf_nesolt_flash_remove,
++};
++
++/******************************************************************************/
++/* Digital I/O                                                                */
++/******************************************************************************/
++static uint32_t keypad_enabled;
++
++static int __init guf_nesolt_keypad_enabled(char *options)
++{
++	if (sscanf(options, "%d", &keypad_enabled) != 1) {
++		pr_err("NESO-LT platform: wrong kepad_enabled parameter syntax. Ignoring.\n");
++		keypad_enabled = 0U;	/* to be sure */
++	}
++	return 0;
++}
++
++__setup("keypad_enabled=", guf_nesolt_keypad_enabled);
++
++/* These are the pin names that will appear under /sys/class/gpio/ */
++const char* mxc_gpio_names[128] = {
++	[DIO_OUT]		= "dio_out",
++	[KP_ROW0]		= "keypad_pin3",
++	[KP_COL0]		= "keypad_pin4",
++	[KP_ROW1]		= "keypad_pin5",
++	[KP_COL1]		= "keypad_pin6",
++	[KP_ROW2]		= "keypad_pin7",
++	[KP_COL2]		= "keypad_pin8",
++	[KP_ROW3]		= "keypad_pin9",
++	[KP_COL3]		= "keypad_pin10",
++	[KP_ROW4]		= "keypad_pin11",
++	[KP_COL4]		= "keypad_pin12",
++	[KP_ROW5_DMA]	= "keypad_pin13",
++	[KP_COL5_SS1]	= "keypad_pin14",
++	[KP_ROW6_MISO]	= "keypad_pin15",
++	[KP_COL6_MOSI]	= "keypad_pin16",
++	[KP_ROW7_SLK]	= "keypad_pin17",
++	[KP_COL7_SS0]	= "keypad_pin18",
++};
++
++static void guf_nesolt_configure_dio(void)
++{
++	/* Request, configure and register GPIOs */
++	/* Power connector (X1) */
++	gpio_request(DIO_OUT, "GPIO");
++	gpio_direction_output(DIO_OUT, 1);
++	gpio_export(DIO_OUT, 0);
++
++	/* If the keypad is not explicitly enabled use the keypad
++	   connector as digital I/O */
++	if(!keypad_enabled) {
++		/* Keypad connector (X16) */
++		gpio_request(KP_ROW0, "GPIO");
++		gpio_request(KP_COL0, "GPIO");
++		gpio_request(KP_ROW1, "GPIO");
++		gpio_request(KP_COL1, "GPIO");
++		gpio_request(KP_ROW2, "GPIO");
++		gpio_request(KP_COL2, "GPIO");
++		gpio_request(KP_ROW3, "GPIO");
++		gpio_request(KP_COL3, "GPIO");
++		gpio_request(KP_ROW4, "GPIO");
++		gpio_request(KP_COL4, "GPIO");
++		gpio_request(KP_ROW5_DMA, "GPIO");
++		gpio_request(KP_COL5_SS1, "GPIO");
++		gpio_request(KP_ROW6_MISO, "GPIO");
++		gpio_request(KP_COL6_MOSI, "GPIO");
++		gpio_request(KP_ROW7_SLK, "GPIO");
++		gpio_request(KP_COL7_SS0, "GPIO");
++
++		gpio_direction_input(KP_ROW0);
++		gpio_direction_input(KP_COL0);
++		gpio_direction_input(KP_ROW1);
++		gpio_direction_input(KP_COL1);
++		gpio_direction_input(KP_ROW2);
++		gpio_direction_input(KP_COL2);
++		gpio_direction_input(KP_ROW3);
++		gpio_direction_input(KP_COL3);
++		gpio_direction_input(KP_ROW4);
++		gpio_direction_input(KP_COL4);
++		gpio_direction_input(KP_ROW5_DMA);
++		gpio_direction_input(KP_COL5_SS1);
++		gpio_direction_input(KP_ROW6_MISO);
++		gpio_direction_input(KP_COL6_MOSI);
++		gpio_direction_input(KP_ROW7_SLK);
++		gpio_direction_input(KP_COL7_SS0);
++
++		gpio_sysfs_set_active_low(KP_ROW0, 0);
++		gpio_sysfs_set_active_low(KP_COL0, 0);
++		gpio_sysfs_set_active_low(KP_ROW1, 0);
++		gpio_sysfs_set_active_low(KP_COL1, 0);
++		gpio_sysfs_set_active_low(KP_ROW2, 0);
++		gpio_sysfs_set_active_low(KP_COL2, 0);
++		gpio_sysfs_set_active_low(KP_ROW3, 0);
++		gpio_sysfs_set_active_low(KP_COL3, 0);
++		gpio_sysfs_set_active_low(KP_ROW4, 0);
++		gpio_sysfs_set_active_low(KP_COL4, 0);
++		gpio_sysfs_set_active_low(KP_ROW5_DMA, 0);
++		gpio_sysfs_set_active_low(KP_COL5_SS1, 0);
++		gpio_sysfs_set_active_low(KP_ROW6_MISO, 0);
++		gpio_sysfs_set_active_low(KP_COL6_MOSI, 0);
++		gpio_sysfs_set_active_low(KP_ROW7_SLK, 0);
++		gpio_sysfs_set_active_low(KP_COL7_SS0, 0);
++
++		/* For the following pins the direction is user
++		   configurable */
++		gpio_export(KP_ROW0, 1);
++		gpio_export(KP_COL0, 1);
++		gpio_export(KP_ROW1, 1);
++		gpio_export(KP_COL1, 1);
++		gpio_export(KP_ROW2, 1);
++		gpio_export(KP_COL2, 1);
++		gpio_export(KP_ROW3, 1);
++		gpio_export(KP_COL3, 1);
++		gpio_export(KP_ROW4, 1);
++		gpio_export(KP_COL4, 1);
++		gpio_export(KP_ROW5_DMA, 1);
++		gpio_export(KP_COL5_SS1, 1);
++		gpio_export(KP_ROW6_MISO, 1);
++		gpio_export(KP_COL6_MOSI, 1);
++		gpio_export(KP_ROW7_SLK, 1);
++		gpio_export(KP_COL7_SS0, 1);
++	}
++}
++
++/******************************************************************************/
++/* Board Initialization                                                       */
++/******************************************************************************/
++static void __init guf_nesolt_board_init(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(guf_nesolt_pads,
++			ARRAY_SIZE(guf_nesolt_pads));
++
++	/* SSI unit master I2S codec connected to SSI_AUD4 */
++	mxc_audmux_v2_configure_port(0,
++			MXC_AUDMUX_V2_PTCR_SYN |
++			MXC_AUDMUX_V2_PTCR_TFSDIR |
++			MXC_AUDMUX_V2_PTCR_TFSEL(3) |
++			MXC_AUDMUX_V2_PTCR_TCLKDIR |
++			MXC_AUDMUX_V2_PTCR_TCSEL(3),
++			MXC_AUDMUX_V2_PDCR_RXDSEL(3)
++	);
++
++	mxc_audmux_v2_configure_port(3,
++			MXC_AUDMUX_V2_PTCR_SYN,
++			MXC_AUDMUX_V2_PDCR_RXDSEL(0)
++	);
++
++	/* Assert reset line for audio codec */
++	gpio_request(CS4265_RESET, "Audio");
++	gpio_direction_output(CS4265_RESET, 1);
++	gpio_set_value(CS4265_RESET, 1);
++
++	/* Configure external touch pins */
++	gpio_request(TOUCH_INT, "CTOUCH");
++	gpio_direction_input(TOUCH_INT);
++	gpio_request(TOUCH_RESET, "CTOUCH");
++	gpio_set_value(TOUCH_RESET, 0);
++	gpio_direction_output(TOUCH_RESET, 1);
++
++	/* Configure RS485_TX_EN */
++	gpio_request(RS485_TX_EN, "UART2");
++	gpio_direction_output(RS485_TX_EN, 1);
++
++	mxc_register_device(&mxc_uart_device0, &guf_nesolt_uart_pdata);
++	mxc_register_device(&mxc_uart_device2, &guf_nesolt_rs485_pdata);
++	mxc_register_device(&mxc_nand_device, &guf_nesolt_nand_pdata);
++	mxc_register_device(&mxc_usbh2, &guf_nesolt_usbh2_pdata);
++	mxc_register_device(&mxc_otg_udc_device, &guf_nesolt_otg_device_pdata);
++	mxc_register_device(&mxc_flexcan_device0, &guf_nesolt_flexcan1_pdata);
++	mxc_register_device(&imx_ssi_device0, &guf_nesolt_ssi_pdata);
++
++#if defined CONFIG_I2C_IMX || defined CONFIG_I2C_IMX_MODULE
++	i2c_register_board_info(0, guf_nesolt_i2c_1_devices,
++			ARRAY_SIZE(guf_nesolt_i2c_1_devices));
++
++	mxc_register_device(&mxc_i2c_device0, &guf_nesolt_i2c_1_pdata);
++
++	i2c_register_board_info(1, guf_nesolt_i2c_2_devices,
++			ARRAY_SIZE(guf_nesolt_i2c_2_devices));
++
++	mxc_register_device(&mxc_i2c_device1, &guf_nesolt_i2c_2_pdata);
++
++	mxc_register_device(&mxc_i2c_device2, &guf_nesolt_i2c_3_pdata);
++#endif
++
++	mxc_register_device(&mxc_sdhc_device1, NULL);
++
++	guf_nesolt_configure_dio();
++
++	register_mtd_user(&guf_nesolt_flash_notifier);
++}
++
++static void __init guf_nesolt_timer_init(void)
++{
++	mx25_clocks_init();
++}
++
++static struct sys_timer guf_nesolt_timer = {
++	.init   = guf_nesolt_timer_init,
++};
++
++MACHINE_START(GUF_NESO_LT, "Garz & Fricke NESO LT")
++	/* Maintainer: Garz & Fricke GmbH */
++	.phys_io		= MX25_AIPS1_BASE_ADDR,
++	.io_pg_offst	= ((MX25_AIPS1_BASE_ADDR_VIRT) >> 18) & 0xfffc,
++#if defined CONFIG_MOVE_ATAG_LIST_FOR_GUF_REDBOOT
++	.boot_params    = MX25_PHYS_OFFSET + 0x10000,
++#else
++	.boot_params    = MX25_PHYS_OFFSET + 0x100,
++#endif
++	.map_io         = mx25_map_io,
++	.init_irq       = mx25_init_irq,
++	.init_machine   = guf_nesolt_board_init,
++	.timer          = &guf_nesolt_timer,
++MACHINE_END
+Index: linux-2.6.33/arch/arm/mach-mx25/Kconfig
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx25/Kconfig
++++ linux-2.6.33/arch/arm/mach-mx25/Kconfig
+@@ -6,4 +6,12 @@ config MACH_MX25_3DS
+ 	select ARCH_MXC_IOMUX_V3
+ 	bool "Support MX25PDK (3DS) Platform"
+ 
++config MACH_GUF_NESO_LT
++	bool "NESO LT platform"
++	select ARCH_MXC_IOMUX_V3
++	select SMSC_PHY
++	help
++	  Include support for Garz+Fricke NESO LT platform. This includes specific
++	  configurations for the board and its peripherals.
++
+ endif
+Index: linux-2.6.33/arch/arm/mach-mx25/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx25/Makefile
++++ linux-2.6.33/arch/arm/mach-mx25/Makefile
+@@ -1,3 +1,4 @@
+ obj-y				:= mm.o devices.o
+ obj-$(CONFIG_ARCH_MX25)		+= clock.o
+ obj-$(CONFIG_MACH_MX25_3DS)	+= mach-mx25pdk.o
++obj-$(CONFIG_MACH_GUF_NESO_LT)	+= mach-guf_nesolt.o
+Index: linux-2.6.33/sound/soc/imx/nesolt-cs4265.c
+===================================================================
+--- /dev/null
++++ linux-2.6.33/sound/soc/imx/nesolt-cs4265.c
+@@ -0,0 +1,151 @@
++/*
++ * nesolt-cs4265.c -- SoC audio for imx_nesolt
++ *
++ * Copyright 2012 Tim Jaacks <tim.jaacks@garz-fricke.de>
++ *
++ * This code is based on code copyrighted by Freescale,
++ * Liam Girdwood, Javier Martin and probably others.
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/device.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <asm/mach-types.h>
++
++#include "../codecs/cs4265.h"
++#include "imx-ssi.h"
++
++/* SSI BCLK and LRC master */
++#define CS4265_SSI_MASTER	1
++
++/* We get the MCLK from the iMX25's CLKO pin, which is actually set to 24.61 MHz */
++#define MCLK_FREQ			24576000
++
++static struct snd_soc_card imx_nesolt;
++
++static int imx_nesolt_audio_hw_params(struct snd_pcm_substream *substream,
++				      struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai_link *machine = rtd->dai;
++	struct snd_soc_dai *cpu_dai = machine->cpu_dai;
++	struct snd_soc_dai *codec_dai = machine->codec_dai;
++	int ret = 0;
++
++	unsigned int channels = params_channels(params);
++	u32 dai_format;
++
++#if CS4265_SSI_MASTER
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
++	    SND_SOC_DAIFMT_CBM_CFM;
++#else
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
++	    SND_SOC_DAIFMT_CBS_CFS;
++#endif
++
++	/* set codec DAI configuration */
++	ret = snd_soc_dai_set_fmt(codec_dai, dai_format);
++	if (ret < 0)
++		return ret;
++
++	/* set i.MX active slot mask */
++	snd_soc_dai_set_tdm_slot(cpu_dai,
++				 channels == 1 ? 0xfffffffe : 0xfffffffc,
++				 channels == 1 ? 0xfffffffe : 0xfffffffc,
++				 2, 32);
++
++	/* set cpu DAI configuration */
++	ret = snd_soc_dai_set_fmt(cpu_dai, dai_format);
++	if (ret < 0)
++		return ret;
++
++	/* set the SSI system clock as input (unused) */
++	snd_soc_dai_set_sysclk(cpu_dai, IMX_SSP_SYS_CLK, 0, SND_SOC_CLOCK_IN);
++
++	return 0;
++}
++
++static int imx_nesolt_startup(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai_link *machine = rtd->dai;
++	struct snd_soc_dai *codec_dai = machine->codec_dai;
++
++	return snd_soc_dai_set_sysclk(codec_dai, 0, MCLK_FREQ, 0);
++}
++
++static void imx_nesolt_shutdown(struct snd_pcm_substream *substream)
++{
++}
++
++static struct snd_soc_ops imx_nesolt_hifi_ops = {
++	.hw_params = imx_nesolt_audio_hw_params,
++	.startup = imx_nesolt_startup,
++	.shutdown = imx_nesolt_shutdown,
++};
++
++static struct snd_soc_dai_link imx_nesolt_dai_cs4265[] = {
++	{
++		.name        = "HiFi",
++		.stream_name = "CS4265 HiFi",
++		.codec_dai   = &cs4265_dai,
++		.ops         = &imx_nesolt_hifi_ops,
++	},
++};
++
++static struct snd_soc_card imx_nesolt = {
++	.name      = "neso-lt-audio",
++	.platform  = &imx_soc_platform,
++	.dai_link  = imx_nesolt_dai_cs4265,
++	.num_links = ARRAY_SIZE(imx_nesolt_dai_cs4265),
++};
++
++static struct snd_soc_device imx_nesolt_snd_devdata = {
++	.card      = &imx_nesolt,
++	.codec_dev = &soc_codec_device_cs4265,
++};
++
++static struct platform_device *imx_nesolt_snd_device;
++
++static int __init imx_nesolt_init(void)
++{
++	int ret;
++
++	imx_nesolt_snd_device = platform_device_alloc("soc-audio", -1);
++	if (!imx_nesolt_snd_device)
++		return -ENOMEM;
++
++	imx_nesolt_dai_cs4265[0].cpu_dai = &imx_ssi_pcm_dai[0];
++
++	platform_set_drvdata(imx_nesolt_snd_device, &imx_nesolt_snd_devdata);
++	imx_nesolt_snd_devdata.dev = &imx_nesolt_snd_device->dev;
++	ret = platform_device_add(imx_nesolt_snd_device);
++
++	if (ret) {
++		printk(KERN_ERR "ASoC: Platform device allocation failed\n");
++		platform_device_put(imx_nesolt_snd_device);
++	}
++
++	return ret;
++}
++
++static void __exit imx_nesolt_exit(void)
++{
++	platform_device_unregister(imx_nesolt_snd_device);
++}
++
++late_initcall(imx_nesolt_init);
++module_exit(imx_nesolt_exit);
++
++MODULE_AUTHOR("Tim Jaacks <tim.jaacks@garz-fricke.de>");
++MODULE_DESCRIPTION("NESO-LT ALSA SoC driver");
++MODULE_LICENSE("GPL");
+Index: linux-2.6.33/sound/soc/imx/Kconfig
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/Kconfig
++++ linux-2.6.33/sound/soc/imx/Kconfig
+@@ -32,3 +32,12 @@ config SND_SOC_NESO_AC97
+ 	help
+ 	  Enable AC97 based access to the UCB1400 Sound/GPIO/Touch controller
+ 	  attached to the SSI0 interface
++
++config SND_SOC_NESOLT_CS4265
++	bool "G+F NESO-LT sound"
++	depends on MACH_GUF_NESO_LT
++	select SND_IMX_SOC
++	select SND_SOC_CS4265
++	help
++	  Enable I2S based access to the CS4265 Audio codec
++	  attached to the SSI0 interface
+Index: linux-2.6.33/sound/soc/imx/Makefile
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/Makefile
++++ linux-2.6.33/sound/soc/imx/Makefile
+@@ -11,3 +11,5 @@ obj-$(CONFIG_SND_IMX_SOC) += snd-soc-imx
+ obj-$(CONFIG_SND_SOC_CUPID_AC97) += cupid-ac97.o
+ 
+ obj-$(CONFIG_SND_SOC_NESO_AC97) += neso-ac97.o
++
++obj-$(CONFIG_SND_SOC_NESOLT_CS4265) += nesolt-cs4265.o

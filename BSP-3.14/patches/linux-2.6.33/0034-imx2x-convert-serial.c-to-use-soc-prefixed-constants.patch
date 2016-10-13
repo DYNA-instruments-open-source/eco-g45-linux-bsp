@@ -1,0 +1,135 @@
+From 62a49d6da9d903f845cbdb28c73a1838986d3cd0 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Uwe=20Kleine-K=C3=B6nig?= <u.kleine-koenig@pengutronix.de>
+Date: Fri, 15 Jan 2010 10:13:30 +0100
+Subject: [PATCH 34/59] imx2x: convert serial.c to use soc-prefixed constants
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+This makes the file compilable for a kernel that supports both imx21 and
+imx27.
+
+Signed-off-by: Uwe Kleine-König <u.kleine-koenig@pengutronix.de>
+---
+ arch/arm/mach-mx2/Makefile |    1 -
+ arch/arm/mach-mx2/serial.c |   48 ++++++++++++++++++++++----------------------
+ 2 files changed, 24 insertions(+), 25 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx2/Makefile
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/Makefile
++++ linux-2.6.33/arch/arm/mach-mx2/Makefile
+@@ -7,7 +7,6 @@
+ obj-y	:=  generic.o devices.o serial.o
+ CFLAGS_generic.o = -DIMX_NEEDS_DEPRECATED_SYMBOLS
+ CFLAGS_devices.o = -DIMX_NEEDS_DEPRECATED_SYMBOLS
+-CFLAGS_serial.o = -DIMX_NEEDS_DEPRECATED_SYMBOLS
+ 
+ obj-$(CONFIG_MACH_MX21) += clock_imx21.o
+ 
+Index: linux-2.6.33/arch/arm/mach-mx2/serial.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx2/serial.c
++++ linux-2.6.33/arch/arm/mach-mx2/serial.c
+@@ -26,12 +26,12 @@
+ 
+ static struct resource uart0[] = {
+ 	{
+-		.start = UART1_BASE_ADDR,
+-		.end = UART1_BASE_ADDR + 0x0B5,
++		.start = MX2x_UART1_BASE_ADDR,
++		.end = MX2x_UART1_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART1,
+-		.end = MXC_INT_UART1,
++		.start = MX2x_INT_UART1,
++		.end = MX2x_INT_UART1,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
+@@ -45,12 +45,12 @@ struct platform_device mxc_uart_device0
+ 
+ static struct resource uart1[] = {
+ 	{
+-		.start = UART2_BASE_ADDR,
+-		.end = UART2_BASE_ADDR + 0x0B5,
++		.start = MX2x_UART2_BASE_ADDR,
++		.end = MX2x_UART2_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART2,
+-		.end = MXC_INT_UART2,
++		.start = MX2x_INT_UART2,
++		.end = MX2x_INT_UART2,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
+@@ -64,12 +64,12 @@ struct platform_device mxc_uart_device1
+ 
+ static struct resource uart2[] = {
+ 	{
+-		.start = UART3_BASE_ADDR,
+-		.end = UART3_BASE_ADDR + 0x0B5,
++		.start = MX2x_UART3_BASE_ADDR,
++		.end = MX2x_UART3_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART3,
+-		.end = MXC_INT_UART3,
++		.start = MX2x_INT_UART3,
++		.end = MX2x_INT_UART3,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
+@@ -83,12 +83,12 @@ struct platform_device mxc_uart_device2
+ 
+ static struct resource uart3[] = {
+ 	{
+-		.start = UART4_BASE_ADDR,
+-		.end = UART4_BASE_ADDR + 0x0B5,
++		.start = MX2x_UART4_BASE_ADDR,
++		.end = MX2x_UART4_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART4,
+-		.end = MXC_INT_UART4,
++		.start = MX2x_INT_UART4,
++		.end = MX2x_INT_UART4,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
+@@ -103,12 +103,12 @@ struct platform_device mxc_uart_device3
+ #ifdef CONFIG_MACH_MX27
+ static struct resource uart4[] = {
+ 	{
+-		.start = UART5_BASE_ADDR,
+-		.end = UART5_BASE_ADDR + 0x0B5,
++		.start = MX27_UART5_BASE_ADDR,
++		.end = MX27_UART5_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART5,
+-		.end = MXC_INT_UART5,
++		.start = MX27_INT_UART5,
++		.end = MX27_INT_UART5,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };
+@@ -122,12 +122,12 @@ struct platform_device mxc_uart_device4
+ 
+ static struct resource uart5[] = {
+ 	{
+-		.start = UART6_BASE_ADDR,
+-		.end = UART6_BASE_ADDR + 0x0B5,
++		.start = MX27_UART6_BASE_ADDR,
++		.end = MX27_UART6_BASE_ADDR + 0x0B5,
+ 		.flags = IORESOURCE_MEM,
+ 	}, {
+-		.start = MXC_INT_UART6,
+-		.end = MXC_INT_UART6,
++		.start = MX27_INT_UART6,
++		.end = MX27_INT_UART6,
+ 		.flags = IORESOURCE_IRQ,
+ 	},
+ };

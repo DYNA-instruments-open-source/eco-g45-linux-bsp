@@ -1,0 +1,27 @@
+From 56f5c198a2746ed8af0bc14d1c4bb0ae8e5314cb Mon Sep 17 00:00:00 2001
+From: Juergen Beisert <j.beisert@pengutronix.de>
+Date: Thu, 11 Mar 2010 17:26:02 +0100
+Subject: [PATCH 59/59] neso: change revision
+
+Set a revision for the NESO kernel.
+
+Not intended for upstream.
+
+Signed-off-by: Juergen Beisert <jbe@pengutronix.de>
+---
+ Makefile |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+Index: linux-2.6.33/Makefile
+===================================================================
+--- linux-2.6.33.orig/Makefile
++++ linux-2.6.33/Makefile
+@@ -1,7 +1,7 @@
+ VERSION = 2
+ PATCHLEVEL = 6
+ SUBLEVEL = 33
+-EXTRAVERSION =
++EXTRAVERSION = -guf-ptx1
+ NAME = Man-Eating Seals of Antiquity
+ 
+ # *DOCUMENTATION*

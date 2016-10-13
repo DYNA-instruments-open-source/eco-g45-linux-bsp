@@ -1,0 +1,294 @@
+--- a/drivers/spi/spi-atmel.c
++++ b/drivers/spi/spi-atmel.c
+@@ -187,7 +187,7 @@
+ 	__raw_writel((value), (port)->regs + SPI_##reg)
+ 
+ /* use PIO for small transfers, avoiding DMA setup/teardown overhead and
+- * cache operations; better heuristics consider wordsize and bitrate.
++ * cache operations; better heuristics consider wordsize, bitrate or CPU speed.
+  */
+ #define DMA_MIN_BYTES	16
+ 
+@@ -232,9 +232,9 @@ struct atmel_spi {
+ 	struct completion	xfer_completion;
+ 	volatile atomic_t xfer_running;
+ 
+-	/* scratch buffer */
+-	void			*buffer;
+-	dma_addr_t		buffer_dma;
++  /* rx/tx buffer */
++  void      *tx_buffer, *rx_buffer;
++  dma_addr_t    tx_buffer_dma, rx_buffer_dma;
+ 
+ 	struct atmel_spi_caps	caps;
+ 
+@@ -255,6 +255,10 @@ struct atmel_spi_device {
+ #define BUFFER_SIZE		PAGE_SIZE
+ #define INVALID_DMA_ADDRESS	0xffffffff
+ 
++unsigned int dma_bounce_limit = 1024;
++module_param(dma_bounce_limit, uint, 0644);
++MODULE_PARM_DESC(dma_bounce_limit, "threshold for setting up single DMA buffers instead of copying the data into a preallocated DMA buffer, max. PAGE_SIZE");
++
+ /*
+  * Version 2 of the SPI controller has
+  *  - CR.LASTXFER
+@@ -574,7 +578,7 @@ static int atmel_spi_next_xfer_dma_submi
+ 	if (xfer->rx_buf) {
+ 		as->dma.sgrx.dma_address = xfer->rx_dma + xfer->len - *plen;
+ 	} else {
+-		as->dma.sgrx.dma_address = as->buffer_dma;
++    as->dma.sgrx.dma_address = as->rx_buffer_dma;
+ 		if (len > BUFFER_SIZE)
+ 			len = BUFFER_SIZE;
+ 	}
+@@ -584,10 +588,10 @@ static int atmel_spi_next_xfer_dma_submi
+ 	if (xfer->tx_buf) {
+ 		as->dma.sgtx.dma_address = xfer->tx_dma + xfer->len - *plen;
+ 	} else {
+-		as->dma.sgtx.dma_address = as->buffer_dma;
++    as->dma.sgtx.dma_address = as->tx_buffer_dma;
+ 		if (len > BUFFER_SIZE)
+ 			len = BUFFER_SIZE;
+-		memset(as->buffer, 0, len);
++    memset(as->tx_buffer, 0, len);
+ 	}
+ 
+ 	sg_dma_len(&as->dma.sgtx) = len;
+@@ -664,7 +668,7 @@ static void atmel_spi_next_xfer_data(str
+ 	if (xfer->rx_buf)
+ 		*rx_dma = xfer->rx_dma + xfer->len - *plen;
+ 	else {
+-		*rx_dma = as->buffer_dma;
++    *rx_dma = as->rx_buffer_dma;
+ 		if (len > BUFFER_SIZE)
+ 			len = BUFFER_SIZE;
+ 	}
+@@ -672,12 +676,10 @@ static void atmel_spi_next_xfer_data(str
+ 	if (xfer->tx_buf)
+ 		*tx_dma = xfer->tx_dma + xfer->len - *plen;
+ 	else {
+-		*tx_dma = as->buffer_dma;
++    *tx_dma = as->tx_buffer_dma;
+ 		if (len > BUFFER_SIZE)
+ 			len = BUFFER_SIZE;
+-		memset(as->buffer, 0, len);
+-		dma_sync_single_for_device(&as->pdev->dev,
+-				as->buffer_dma, len, DMA_TO_DEVICE);
++    memset(as->tx_buffer, 0, len);
+ 	}
+ 
+ 	*plen = len;
+@@ -735,6 +737,7 @@ static int atmel_spi_set_xfer_speed(stru
+     csr = SPI_BFINS(SCBR, scbr, csr);
+     spi_writel(as, CSR0 + 4 * spi->chip_select, csr);
+     asd->csr = csr;
++    asd->configured_speed_hz = xfer->speed_hz;
+ 
+     // calc the threshold for busy waiting for the end of a DMA or PDC transfer
+     asd->wait_sync_threshold = xfer->speed_hz / (8UL * bus_hz / 1000UL);
+@@ -823,6 +826,10 @@ atmel_spi_dma_map_xfer(struct atmel_spi
+ 	struct device	*dev = &as->pdev->dev;
+ 
+ 	xfer->tx_dma = xfer->rx_dma = INVALID_DMA_ADDRESS;
++  if (dma_bounce_limit > BUFFER_SIZE)
++    dma_bounce_limit = BUFFER_SIZE;
++
++  if (xfer->len > dma_bounce_limit) {
+ 	if (xfer->tx_buf) {
+ 		/* tx_buf is a const void* where we need a void * for the dma
+ 		 * mapping */
+@@ -846,17 +853,31 @@ atmel_spi_dma_map_xfer(struct atmel_spi
+ 			return -ENOMEM;
+ 		}
+ 	}
++  }
++  else {
++    if (xfer->tx_buf) {
++      memcpy(as->tx_buffer, xfer->tx_buf, xfer->len);
++      xfer->tx_dma = as->tx_buffer_dma;
++    }
++    if (xfer->rx_buf) {
++      memcpy(as->rx_buffer, xfer->rx_buf, xfer->len);
++      xfer->rx_dma = as->rx_buffer_dma;
++    }
++  }
++
+ 	return 0;
+ }
+ 
+-static void atmel_spi_dma_unmap_xfer(struct spi_master *master,
++static void atmel_spi_dma_unmap_xfer(struct atmel_spi *as,
+ 				     struct spi_transfer *xfer)
+ {
+-	if (xfer->tx_dma != INVALID_DMA_ADDRESS)
+-		dma_unmap_single(master->dev.parent, xfer->tx_dma,
++  struct device *dev = &as->pdev->dev;
++
++  if ((xfer->tx_dma != as->tx_buffer_dma) && (xfer->tx_dma != INVALID_DMA_ADDRESS))
++    dma_unmap_single(dev, xfer->tx_dma,
+ 				 xfer->len, DMA_TO_DEVICE);
+-	if (xfer->rx_dma != INVALID_DMA_ADDRESS)
+-		dma_unmap_single(master->dev.parent, xfer->rx_dma,
++  if ((xfer->rx_dma != as->rx_buffer_dma) && (xfer->rx_dma != INVALID_DMA_ADDRESS))
++    dma_unmap_single(dev, xfer->rx_dma,
+ 				 xfer->len, DMA_FROM_DEVICE);
+ }
+ 
+@@ -992,15 +1013,18 @@ atmel_spi_pdc_interrupt(int irq, void *d
+     if (1 < atomic_read(&as->xfer_running))
+       complete(&as->xfer_completion);
+     atomic_set(&as->xfer_running, 0);
++    smp_wmb();
+ 
+ 	} else if (pending & (SPI_BIT(RXBUFF) | SPI_BIT(ENDRX))) {
+ 		ret = IRQ_HANDLED;
+ 
+-		spi_writel(as, IDR, pending);
++		spi_writel(as, IDR, (SPI_BIT(RXBUFF) | SPI_BIT(ENDRX)));
+ 
+     if (1 < atomic_read(&as->xfer_running))
+       complete(&as->xfer_completion);
+ 		atomic_set(&as->xfer_running, 0);
++    smp_wmb();
++
+ 	}
+ 
+ 	return ret;
+@@ -1137,10 +1161,11 @@ static int atmel_spi_one_transfer(struct
+ 	while (as->current_remaining_bytes) {
+ 		reinit_completion(&as->xfer_completion);
+ 
+-		if (as->current_remaining_bytes > asd->wait_sync_threshold)
++		if (as->current_remaining_bytes < asd->wait_sync_threshold)
+ 		  atomic_set(&as->xfer_running, 1); // wait sync
+ 		else
+ 		  atomic_set(&as->xfer_running, 2); // wait async
++		smp_wmb();
+ 
+ 		if (as->use_pdc) {
+       atmel_spi_pdc_next_xfer(master, msg, xfer);
+@@ -1152,26 +1177,28 @@ static int atmel_spi_one_transfer(struct
+ 				dev_err(&spi->dev,
+ 					"unable to use DMA, fallback to PIO\n");
+         atomic_set(&as->xfer_running, 2); // wait async
++        smp_wmb();
+         atmel_spi_next_xfer_pio(master, xfer);
+ 			} else {
+         as->current_remaining_bytes -= len;
+       }
+ 		} else {
+       atomic_set(&as->xfer_running, 2); // wait async
++      smp_wmb();
+ 			atmel_spi_next_xfer_pio(master, xfer);
+ 		}
+ 
+-		if (1 < atomic_read(&as->xfer_running)) {
+       atmel_spi_unlock(as);
++		if (1 < atomic_read(&as->xfer_running)) {
+       ret = wait_for_completion_timeout(&as->xfer_completion,
+                 SPI_DMA_TIMEOUT);
+-      atmel_spi_lock(as);
+     }
+ 		else {
+       while (atomic_read(&as->xfer_running))
+         ;
+-      ret = 0;
++      ret = 1;
+     }
++		atmel_spi_lock(as);
+ 
+ 		if (WARN_ON(ret == 0)) {
+ 			dev_err(&spi->dev,
+@@ -1215,9 +1242,12 @@ static int atmel_spi_one_transfer(struct
+ 			atmel_spi_stop_dma(as);
+ 		}
+ 
++    if (as->use_pdc)
++      atmel_spi_disable_pdc_transfer(as);
++
+ 		if (!msg->is_dma_mapped
+ 			&& (atmel_spi_use_dma(as, xfer) || as->use_pdc))
+-			atmel_spi_dma_unmap_xfer(master, xfer);
++      atmel_spi_dma_unmap_xfer(as, xfer);
+ 
+ 		return ret;
+ 
+@@ -1226,9 +1256,12 @@ static int atmel_spi_one_transfer(struct
+ 		msg->actual_length += xfer->len;
+ 	}
+ 
++  if (as->use_pdc)
++    atmel_spi_disable_pdc_transfer(as);
++
+ 	if (!msg->is_dma_mapped
+ 		&& (atmel_spi_use_dma(as, xfer) || as->use_pdc))
+-		atmel_spi_dma_unmap_xfer(master, xfer);
++    atmel_spi_dma_unmap_xfer(as, xfer);
+ 
+ 	if (xfer->delay_usecs)
+ 		udelay(xfer->delay_usecs);
+@@ -1288,10 +1321,6 @@ static int atmel_spi_transfer_one_messag
+ 	  }
+ 	}
+ 
+-  // FIXME: do we really need this, if the code does everything properly
+-	if (as->use_pdc)
+-		atmel_spi_disable_pdc_transfer(as);
+-
+ 	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+ 		dev_dbg(&spi->dev,
+ 			"  xfer %p: len %u tx %p/%08x rx %p/%08x\n",
+@@ -1382,14 +1411,20 @@ static int atmel_spi_probe(struct platfo
+ 	as = spi_master_get_devdata(master);
+ 
+ 	/*
+-	 * Scratch buffer is used for throwaway rx and tx data.
++   * rx/tx buffer is used for throwaway rx and tx data as well
++   * as for copying "small" data sets instead of setting up streaming buffer.
+ 	 * It's coherent to minimize dcache pollution.
+ 	 */
+-	as->buffer = dma_alloc_coherent(&pdev->dev, BUFFER_SIZE,
+-					&as->buffer_dma, GFP_KERNEL);
+-	if (!as->buffer)
++  as->tx_buffer = dma_alloc_coherent(&pdev->dev, BUFFER_SIZE,
++          &as->tx_buffer_dma, GFP_KERNEL);
++  if (!as->tx_buffer)
+ 		goto out_free;
+ 
++  as->rx_buffer = dma_alloc_coherent(&pdev->dev, BUFFER_SIZE,
++          &as->rx_buffer_dma, GFP_KERNEL);
++  if (!as->rx_buffer)
++    goto out_free_tx_buffer;
++
+ 	spin_lock_init(&as->lock);
+ 
+ 	as->pdev = pdev;
+@@ -1465,8 +1500,11 @@ out_free_dma:
+ out_free_irq:
+ out_unmap_regs:
+ out_free_buffer:
+-	dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->buffer,
+-			as->buffer_dma);
++  dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->rx_buffer,
++      as->rx_buffer_dma);
++out_free_tx_buffer:
++  dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->tx_buffer,
++      as->tx_buffer_dma);
+ out_free:
+ 	spi_master_put(master);
+ 	return ret;
+@@ -1489,8 +1527,11 @@ static int atmel_spi_remove(struct platf
+ 	spi_readl(as, SR);
+ 	spin_unlock_irq(&as->lock);
+ 
+-	dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->buffer,
+-			as->buffer_dma);
++  dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->tx_buffer,
++      as->tx_buffer_dma);
++
++  dma_free_coherent(&pdev->dev, BUFFER_SIZE, as->rx_buffer,
++      as->rx_buffer_dma);
+ 
+ 	clk_disable_unprepare(as->clk);
+ 

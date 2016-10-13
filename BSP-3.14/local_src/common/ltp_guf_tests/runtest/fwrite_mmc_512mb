@@ -1,0 +1,15 @@
+# DESCRIPTION: Garz & Fricke fwrite endurance test
+# --------------------------------------------------------------------------
+# This test sequence writes files from 100 Bytes to 1MBytes (10x each),
+# 10 MBytes (15x) and 100 MBytes (3x) on an SD-Card. This is approx. 462 MBytes
+# in total and takes about 2 minutes (if the card runs at 5 MB/s). You can
+# copy and paste the following lines a few times to run them more than once.
+# The SD-Card has to be mounted in /mnt/mmc.
+# --------------------------------------------------------------------------
+fwrite_100            fwrite -n /mnt/mmc/file100 -b 100 -i 10
+fwrite_1k             fwrite -n /mnt/mmc/file1k -b 1024 -i 10
+fwrite_10k            fwrite -n /mnt/mmc/file10k -b 10240 -i 10
+fwrite_100k           fwrite -n /mnt/mmc/file100k -b 102400 -i 10
+fwrite_1M             fwrite -n /mnt/mmc/file1M -b 1048576 -i 10
+fwrite_10M            fwrite -n /mnt/mmc/file10M -b 10485760 -i 15
+fwrite_100M           fwrite -n /mnt/mmc/file100M -b 104857600 -i 3

@@ -1,0 +1,181 @@
+From 3e28162f9935b8a17cfb3162fa4185a7e360d57b Mon Sep 17 00:00:00 2001
+From: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Date: Mon, 22 Feb 2010 21:24:55 +0100
+Subject: [PATCH 43/59] use_static_dai
+
+commit 48dbc41988d07c7a9ba83afd31543d8ecb2beecc
+Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
+Date:   Wed Jan 6 17:56:52 2010 +0000
+
+    ASoC: Convert new i.MX SSI driver to use static DAI array
+
+    While dynamically allocated DAIs are the way forward the core doesn't
+    yet support anything except matching with a pointer to the actual DAI
+    so convert to doing that so that machine drivers don't have to jump
+    through hoops to register themselves.
+
+    Signed-off-by: Mark Brown <broonie@opensource.wolfsonmicro.com>
+    Acked-by: Javier Martin <javier.martin@vista-silicon.com>
+---
+ sound/soc/imx/imx-ssi.c |   40 ++++++++++++++++++++--------------------
+ sound/soc/imx/imx-ssi.h |    3 +--
+ 2 files changed, 21 insertions(+), 22 deletions(-)
+
+Index: linux-2.6.33/sound/soc/imx/imx-ssi.c
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/imx-ssi.c
++++ linux-2.6.33/sound/soc/imx/imx-ssi.c
+@@ -85,7 +85,7 @@
+ static int imx_ssi_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai,
+ 	unsigned int tx_mask, unsigned int rx_mask, int slots, int slot_width)
+ {
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	u32 sccr;
+ 
+ 	sccr = readl(ssi->base + SSI_STCCR);
+@@ -112,7 +112,7 @@ static int imx_ssi_set_dai_tdm_slot(stru
+  */
+ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ {
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	u32 strcr = 0, scr;
+ 
+ 	scr = readl(ssi->base + SSI_SCR) & ~(SSI_SCR_SYN | SSI_SCR_NET);
+@@ -185,7 +185,7 @@ static int imx_ssi_set_dai_fmt(struct sn
+ static int imx_ssi_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
+ 				  int clk_id, unsigned int freq, int dir)
+ {
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	u32 scr;
+ 
+ 	scr = readl(ssi->base + SSI_SCR);
+@@ -213,7 +213,7 @@ static int imx_ssi_set_dai_sysclk(struct
+ static int imx_ssi_set_dai_clkdiv(struct snd_soc_dai *cpu_dai,
+ 				  int div_id, int div)
+ {
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	u32 stccr, srccr;
+ 
+ 	stccr = readl(ssi->base + SSI_STCCR);
+@@ -262,7 +262,7 @@ static int imx_ssi_hw_params(struct snd_
+ 			     struct snd_pcm_hw_params *params,
+ 			     struct snd_soc_dai *cpu_dai)
+ {
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	u32 reg, sccr;
+ 
+ 	/* Tx/Rx config */
+@@ -299,7 +299,7 @@ static int imx_ssi_trigger(struct snd_pc
+ {
+ 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+ 	struct snd_soc_dai *cpu_dai = rtd->dai->cpu_dai;
+-	struct imx_ssi *ssi = container_of(cpu_dai, struct imx_ssi, dai);
++	struct imx_ssi *ssi = cpu_dai->private_data;
+ 	unsigned int sier_bits, sier;
+ 	unsigned int scr;
+ 
+@@ -788,7 +788,7 @@ struct snd_ac97_bus_ops soc_ac97_ops = {
+ };
+ EXPORT_SYMBOL_GPL(soc_ac97_ops);
+ 
+-struct snd_soc_dai *imx_ssi_pcm_dai[2];
++struct snd_soc_dai imx_ssi_pcm_dai[2];
+ EXPORT_SYMBOL_GPL(imx_ssi_pcm_dai);
+ 
+ static int imx_ssi_probe(struct platform_device *pdev)
+@@ -799,6 +799,10 @@ static int imx_ssi_probe(struct platform
+ 	struct snd_soc_platform *platform;
+ 	int ret = 0;
+ 	unsigned int val;
++	struct snd_soc_dai *dai = &imx_ssi_pcm_dai[pdev->id];
++
++	if (dai->id >= ARRAY_SIZE(imx_ssi_pcm_dai))
++		return -EINVAL;
+ 
+ 	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
+ 	if (!ssi)
+@@ -810,8 +814,6 @@ static int imx_ssi_probe(struct platform
+ 		ssi->flags = pdata->flags;
+ 	}
+ 
+-	imx_ssi_pcm_dai[pdev->id] = &ssi->dai;
+-
+ 	ssi->irq = platform_get_irq(pdev, 0);
+ 
+ 	ssi->clk = clk_get(&pdev->dev, NULL);
+@@ -849,13 +851,9 @@ static int imx_ssi_probe(struct platform
+ 		}
+ 		ac97_ssi = ssi;
+ 		setup_channel_to_ac97(ssi);
+-		memcpy(&ssi->dai, &imx_ac97_dai, sizeof(imx_ac97_dai));
++		memcpy(dai, &imx_ac97_dai, sizeof(imx_ac97_dai));
+ 	} else
+-		memcpy(&ssi->dai, &imx_ssi_dai, sizeof(imx_ssi_dai));
+-
+-	ssi->dai.id = pdev->id;
+-	ssi->dai.dev = &pdev->dev;
+-	ssi->dai.name = kasprintf(GFP_KERNEL, "imx-ssi.%d", pdev->id);
++		memcpy(dai, &imx_ssi_dai, sizeof(imx_ssi_dai));
+ 
+ 	writel(0x0, ssi->base + SSI_SIER);
+ 
+@@ -870,9 +868,10 @@ static int imx_ssi_probe(struct platform
+ 	if (res)
+ 		ssi->dma_params_rx.dma = res->start;
+ 
+-	ssi->dai.id = pdev->id;
+-	ssi->dai.dev = &pdev->dev;
+-	ssi->dai.name = kasprintf(GFP_KERNEL, "imx-ssi.%d", pdev->id);
++	dai->id = pdev->id;
++	dai->dev = &pdev->dev;
++	dai->name = kasprintf(GFP_KERNEL, "imx-ssi.%d", pdev->id);
++	dai->private_data = ssi;
+ 
+ 	if ((cpu_is_mx27() || cpu_is_mx21()) &&
+ 			!(ssi->flags & IMX_SSI_USE_AC97)) {
+@@ -889,7 +888,7 @@ static int imx_ssi_probe(struct platform
+ 		SSI_SFCSR_RFWM0(ssi->dma_params_rx.burstsize);
+ 	writel(val, ssi->base + SSI_SFCSR);
+ 
+-	ret = snd_soc_register_dai(&ssi->dai);
++	ret = snd_soc_register_dai(dai);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "register DAI failed\n");
+ 		goto failed_register;
+@@ -917,8 +916,9 @@ static int __devexit imx_ssi_remove(stru
+ {
+ 	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	struct imx_ssi *ssi = platform_get_drvdata(pdev);
++	struct snd_soc_dai *dai = &imx_ssi_pcm_dai[pdev->id];
+ 
+-	snd_soc_unregister_dai(&ssi->dai);
++	snd_soc_unregister_dai(dai);
+ 
+ 	if (ssi->flags & IMX_SSI_USE_AC97)
+ 		ac97_ssi = NULL;
+Index: linux-2.6.33/sound/soc/imx/imx-ssi.h
+===================================================================
+--- linux-2.6.33.orig/sound/soc/imx/imx-ssi.h
++++ linux-2.6.33/sound/soc/imx/imx-ssi.h
+@@ -189,7 +189,7 @@
+ #define TAG_PCM_OUT			0x9800
+ #define TAG_VALID			0x8000
+ 
+-extern struct snd_soc_dai *imx_ssi_pcm_dai[2];
++extern struct snd_soc_dai imx_ssi_pcm_dai[2];
+ extern struct snd_soc_platform imx_soc_platform;
+ 
+ #define DRV_NAME "imx-ssi"
+@@ -201,7 +201,6 @@ struct imx_pcm_dma_params {
+ };
+ 
+ struct imx_ssi {
+-	struct snd_soc_dai dai;
+ 	struct platform_device *ac97_dev;
+ 
+ 	struct snd_soc_device imx_ac97;

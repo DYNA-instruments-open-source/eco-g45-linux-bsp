@@ -1,0 +1,9 @@
+## SECTION=fixme
+
+config QT4_GUF_SSL
+bool
+select QT4
+select QT4_OPENSSL
+prompt "Garz & Fricke Qt4 SSL demo application"
+help
+  Garz & Fricke Qt4 SSL demo application.

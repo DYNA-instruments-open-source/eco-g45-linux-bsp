@@ -1,0 +1,416 @@
+--- /dev/null
++++ b/arch/arm/mach-at91/board-eco-g45.c
+@@ -0,0 +1,330 @@
++/*
++ *  Board-specific setup code for the ECO-G45
++ *
++ *  Copyright (C) 2011 Garz & Fricke GmbH.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ */
++
++#include <linux/printk.h>
++#include <linux/types.h>
++#include <linux/init.h>
++#include <linux/mm.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/spi/spi.h>
++#include <linux/fb.h>
++#include <linux/clk.h>
++#include <linux/atmel-mci.h>
++#include <linux/atmel-pwm-bl.h>
++#include <linux/mtd/physmap.h>
++#include <linux/mtd/plat-ram.h>
++#include <linux/platform_data/at24.h>
++
++#include <mach/hardware.h>
++#include <video/atmel_lcdc.h>
++
++#include <asm/setup.h>
++#include <asm/mach-types.h>
++#include <asm/irq.h>
++
++#include <asm/mach/arch.h>
++#include <asm/mach/map.h>
++#include <asm/mach/irq.h>
++
++#include <linux/gpio.h>
++#include <linux/clk/at91_pmc.h>
++#include <mach/at91sam9_smc.h>
++
++#include "board.h"
++#include "generic.h"
++#include "at91_aic.h"
++
++/*
++ * MACB Ethernet device
++ */
++static struct macb_platform_data __initdata eco_g45_macb_data = {
++  .phy_irq_pin  = AT91_PIN_PD1,
++  .is_rmii  = 1,
++};
++
++/*
++ * MCI (SD/MMC)
++ */
++static struct mci_platform_data __initdata eco_g45_mci1_data = {
++  .slot[0] = {
++    .bus_width  = 4,
++    .detect_pin = AT91_PIN_PD0,
++    .wp_pin   = -EINVAL,
++  },
++};
++
++/*
++ * I2C
++ */
++static void eco_g45_eeprom_setup(struct memory_accessor *macc, void *context) {
++}
++
++static struct at24_platform_data eco_g45_eeprom = {
++  .byte_len = 4096,
++  .page_size = 32,
++  .flags = AT24_FLAG_ADDR16,
++  .setup = eco_g45_eeprom_setup,
++};
++
++static struct i2c_board_info __initdata eco_g45_i2c_devices[] = {
++  {
++    /* SOC EEPROM */
++    I2C_BOARD_INFO("24c32", 0x57),
++    .platform_data = &eco_g45_eeprom,
++  },
++};
++
++/*
++ * NAND flash
++ */
++static struct mtd_partition __initdata eco_g45_nand_partition[] = {
++  {
++    .name = "bootstrap",
++    .offset = 0,
++    .size = SZ_128K,
++  },
++  {
++    .name = "uboot",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = SZ_512K,
++  },
++  {
++    .name = "env1",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = SZ_128K,
++  },
++  {
++    .name = "env2",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = SZ_128K,
++  },
++  {
++    .name = "bootlogo",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = SZ_512K,
++  },
++  {
++    .name = "linux",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = 6 * SZ_1M,
++  },
++  {
++    .name = "root",
++    .offset = MTDPART_OFS_NXTBLK,
++    .size = MTDPART_SIZ_FULL,
++  },
++};
++
++/* det_pin is not connected */
++static struct atmel_nand_data __initdata eco_g45_nand_data = {
++  .ale    = 21,
++  .cle    = 22,
++  .rdy_pin  = AT91_PIN_PC8,
++  .enable_pin = AT91_PIN_PC14,
++  .det_pin  = -EINVAL,
++  //.det_pin  = -1,
++  //.det_pin  = 0,
++  .ecc_mode = NAND_ECC_SOFT,
++  .on_flash_bbt = 1,
++  .parts    = eco_g45_nand_partition,
++  .num_parts  = ARRAY_SIZE(eco_g45_nand_partition),
++  .bus_width_16 = 0,
++};
++
++static struct sam9_smc_config __initdata eco_g45_nand_smc_config = {
++  .ncs_read_setup   = 0,
++  .nrd_setup    = 1,
++  .ncs_write_setup  = 0,
++  .nwe_setup    = 1,
++
++  .ncs_read_pulse   = 2,
++  .nrd_pulse    = 3,
++  .ncs_write_pulse  = 3,
++  .nwe_pulse    = 4,
++
++  .read_cycle   = 4,
++  .write_cycle    = 7,
++
++  .mode     = AT91_SMC_READMODE | AT91_SMC_WRITEMODE | AT91_SMC_EXNWMODE_DISABLE | AT91_SMC_DBW_8 | AT91_SMC_TDFMODE,
++  .tdf_cycles   = 3,
++};
++
++static void __init eco_g45_add_device_nand(void)
++{
++  /* configure chip-select 3 (NAND) */
++  sam9_smc_configure(0, 3, &eco_g45_nand_smc_config);
++
++  at91_add_device_nand(&eco_g45_nand_data);
++}
++
++/*
++ * SRAM MTD
++ */
++static struct platdata_mtd_ram eco_g45_sram_pdata = {
++  .mapname  = "SRAM",
++  .bankwidth  = 1,
++};
++
++static struct resource eco_g45_sram_resource[] = {
++  [0] = {
++    .start = AT91_CHIPSELECT_0,
++    .end   = AT91_CHIPSELECT_0 + 512 * 1024 - 1,
++    .flags = IORESOURCE_MEM,
++  },
++};
++
++/*
++ * Battery-backed SRAM
++ */
++static struct platform_device eco_g45_sram = {
++  .name   = "mtd-ram",
++  .id   = 0,
++  .resource = eco_g45_sram_resource,
++  .num_resources  = ARRAY_SIZE(eco_g45_sram_resource),
++  .dev  = {
++    .platform_data = &eco_g45_sram_pdata,
++  },
++};
++
++/*
++ * Platform devices
++ */
++static struct platform_device *eco_g45_platform_devices[] __initdata = {
++  &eco_g45_sram,
++};
++
++void __iomem __initdata *at91_sckcr = 0;
++
++void __init at91_ioremap_sckcr(u32 base_addr)
++{
++  at91_sckcr = ioremap(base_addr, 16);
++  if (!at91_sckcr)
++    panic("Impossible to ioremap at91_sckcr\n");
++}
++
++void __init at91_iounmap_sckcr(void)
++{
++  iounmap(at91_sckcr);
++}
++
++#define at91_sckcr_read() \
++    __raw_readl(at91_sckcr)
++
++#define at91_sckcr_write(value) \
++    __raw_writel(value, at91_sckcr)
++
++// TODO: select in Kconfig for SLCK on RC or quartz (changes current consumption and RTC behavior, prob. depends on RTC selection...)
++static void __init eco_g45_check_slowclock(void)
++{
++  u32 sckcr;
++  unsigned i;
++
++  // check, if the slow oscillator is enabled and running, else try to enable it for a stable 32.768kHz clock
++  at91_ioremap_sckcr(AT91SAM9G45_SCKCR);
++  sckcr = at91_sckcr_read();
++
++  printk(KERN_INFO "Slow clock: RC: %s, 32kHz: %s, source: %s\n",
++             (sckcr & (1 << 0)) ? "on" : "off",
++             ((sckcr & (3 << 1)) == (1 << 1)) ? "quartz" : ((sckcr & (3 << 1)) == (3 << 1)) ? "ext. clock" : "off",
++             (sckcr & (1 << 3)) ? "32kHz" : "RC"
++  );
++
++  if (!(sckcr & (1 << 3))) {
++    //   * recommended procedure for switching the slowclock:
++    //   * Switch the master clock to a source different from slow clock (PLLA or PLLB or Main Oscillator)
++    //   * through the Power management Controller.
++    // since we are not authoritative for the master clock, we do not switch but check it
++    if ((at91_pmc_read(AT91_PMC_MCKR) & AT91_PMC_CSS) != AT91_PMC_CSS_SLOW) {
++      //   * Enable the 32768 Hz oscillator by setting the bit OSCEN to 1.
++      sckcr |= (1 << 1);
++      at91_sckcr_write(sckcr);
++      pr_devel("Waiting for slow clock 32768 Hz oscillator to come up\n");
++      //   * Wait 32768 Hz Startup Time for clock stabilization (software loop for 1200ms)
++      for (i = 1200U * (100000000U / 1000U / 2U); i > 0; i--)
++        sckcr = at91_sckcr_read();
++      pr_devel("Slow clock 32768 Hz oscillator is up now, waiting for resynchronization\n");
++      //   * Switch from internal RC to 32768Hz by setting the bit OSCSEL to 1.
++      sckcr |= (1 << 3);
++      at91_sckcr_write(sckcr);
++      //   * Wait 5 slow clock cycles for internal resynchronization
++      for (i = 5U * (100000000U / 32768U / 2U); i > 0; i--)
++        sckcr = at91_sckcr_read();
++      pr_devel("Slow clock is now in sync with 32768 Hz oscillator\n");
++      //   * Disable the RC oscillator by setting the bit RCEN to 0
++      sckcr &= ~(1 << 0);
++      at91_sckcr_write(sckcr);
++    }
++    else {
++      printk(KERN_WARNING "MCK runs on slow clock, cannot switch from RC oscillator to 32768 Hz oscillator\n");
++    }
++  }
++
++
++  at91_iounmap_sckcr();
++}
++
++static void __init eco_g45_init_early(void)
++{
++	/* Initialize processor: 12.000 MHz crystal */
++  at91_initialize(12000000);
++  eco_g45_check_slowclock();
++}
++
++#if IS_ENABLED(MACH_ECOG45_EVAL)
++extern void __init eco_g45_base_board_init(void);
++#else
++static inline void __init eco_g45_base_board_init(void) {}
++#endif
++
++static void __init eco_g45_board_init(void)
++{
++  /* configure CS2, CS4, CS5, cann't be used for anything else */
++  at91_set_A_periph(AT91_PIN_PC13, 0);
++  at91_set_A_periph(AT91_PIN_PC10, 0);
++  at91_set_A_periph(AT91_PIN_PC11, 0);
++
++	/* Serial */
++  // TODO: Select ttyS0 device in Kconfig for console purposes
++  /* DGBU on ttyS0. (Rx & Tx only) */
++  at91_register_uart(0, 0, 0);
++//	at91_add_device_serial();
++	/* MMC/SD */
++//	at91_add_device_mci(0, &eco_g45_mci0_data);
++  // TODO: select MCI1 from Kconfig
++	at91_add_device_mci(1, &eco_g45_mci1_data);
++	/* Ethernet */
++	at91_add_device_eth(&eco_g45_macb_data);
++	/* NAND */
++	eco_g45_add_device_nand();
++	/* I2C */
++  // TODO: select I2C-EEPROM from Kconfig
++	at91_add_device_i2c(0, eco_g45_i2c_devices,
++		ARRAY_SIZE(eco_g45_i2c_devices));
++
++	/* Platform devices */
++  // TODO: select SRAM support from Kconfig
++	platform_add_devices(eco_g45_platform_devices,
++		ARRAY_SIZE(eco_g45_platform_devices));
++
++	eco_g45_base_board_init();
++}
++
++MACHINE_START(MACH_ECOG45, "Garz & Fricke ECO-G45")
++	/* Maintainer: DYNA Instruments */
++  .init_time  = at91sam926x_pit_init,
++  .map_io   = at91_map_io,
++  .handle_irq = at91_aic_handle_irq,
++  .init_irq = at91_init_irq_default,
++  .init_early = eco_g45_init_early,
++	.init_machine	= eco_g45_board_init,
++MACHINE_END
+--- a/arch/arm/mach-at91/Kconfig.non_dt
++++ b/arch/arm/mach-at91/Kconfig.non_dt
+@@ -317,6 +317,9 @@ if ARCH_AT91SAM9G45
+ 
+ comment "AT91SAM9G45 Board Type"
+ 
++choice
++    prompt "Atmel AT91SAM9/G45 based board type"
++
+ config MACH_AT91SAM9M10G45EK
+ 	bool "Atmel AT91SAM9M10G45-EK Evaluation Kits"
+ 	help
+@@ -325,6 +328,35 @@ config MACH_AT91SAM9M10G45EK
+ 	  families: AT91SAM9G45, AT91SAM9G46, AT91SAM9M10 and AT91SAM9M11.
+ 	  <http://www.atmel.com/tools/SAM9M10-G45-EK.aspx>
+ 
++config MACH_ECOG45
++    bool "Garz & Fricke eco-G45 module"
++    help
++      Select this if you are using the eco-G45 board with your own base board without
++      special board file in the kernel tree. This provides a minimal set of board
++      support which does not depend on base board features.
++
++      One may add support for runtime configuration via configFS to avoid a board file
++      in the kernel tree.
++
++      The provided minimal configuration for the ECO G45 module contains support for:
++      * CPU and RAM on module
++      * serial console (depends on CONFIG_SERIAL_ATMEL)
++      * NAND flash on module (depends on CONFIG_MTD_NAND_ATMEL)
++      * Ethernet (depends on CONFIG_MACB)
++      * MicroSD-Slot on the module (depends on CONFIG_MMC_ATMELMCI)
++      * EEPROM on the module (depends on CONFIG_I2C_AT91)
++      * RTC support (depends on CONFIG_RTC_DRV_AT91RM9200 | CONFIG_RTC_DRV_AT91SAM9)
++
++config MACH_ECOG45_EVAL
++    bool "Garz & Fricke eco-G45 module on the EVAL board"
++    help
++      Select this for the full blown EVAL board support for the Garz & Fricke
++      ECO-G45 module on its starter kit.
++
++      This supports LCD, touch screen, SD slot, USB host and audio.
++
++endchoice
++
+ endif
+ 
+ # ----------------------------------------------------------
+@@ -355,8 +387,8 @@ config MTD_AT91_DATAFLASH_CARD
+ 
+ config MACH_AT91SAM9G45_CONFIG
+     tristate "AT91SAM9G45 configFS platform device configuration"
+-    default n
+-    depends on ARCH_AT91SAM9G45 && !MACH_AT91SAM9M10G45EK
++    default m if MACH_ECOG45
++    depends on ARCH_AT91SAM9G45 && !MACH_ECOG45_EVAL && !MACH_AT91SAM9M10G45EK
+     select CONFIGFS_FS
+     help
+       This selects the runtime platform device configuration via configFS. This way
+--- a/arch/arm/mach-at91/Makefile
++++ b/arch/arm/mach-at91/Makefile
+@@ -80,8 +80,9 @@ obj-$(CONFIG_MACH_SNAPPER_9260)	+= board
+ 
+ # AT91SAM9G45 board-specific support
+ obj-$(CONFIG_MACH_AT91SAM9M10G45EK) += board-sam9m10g45ek.o
+-obj-$(CONFIG_MACH_AT91SAM9G45_CONFIG)	+= configfs-at91sam9g45.o
+-configfs-at91sam9g45-objs := board-configfs-at91sam9g45.o at91sam9g45_devices.o
++obj-$(CONFIG_MACH_AT91SAM9G45_CONFIG)	+= board-configfs-at91sam9g45.o
++obj-$(CONFIG_MACH_ECOG45)			+= board-eco-g45.o
++obj-$(CONFIG_MACH_ECOG45_EVAL)		+= board-eco-g45.o board-eval-eco-g45.o
+ 
+ # AT91SAM board with device-tree
+ obj-$(CONFIG_MACH_AT91RM9200_DT) += board-dt-rm9200.o
+--- a/arch/arm/mach-at91/include/mach/at91sam9g45.h
++++ b/arch/arm/mach-at91/include/mach/at91sam9g45.h
+@@ -86,6 +86,7 @@
+ /*
+  * System Peripherals
+  */
++#define AT91SAM9G45_SCKCR 0xfffffd50
+ #define AT91SAM9G45_BASE_ECC	0xffffe200
+ #define AT91SAM9G45_BASE_DDRSDRC1 0xffffe400
+ #define AT91SAM9G45_BASE_DDRSDRC0 0xffffe600

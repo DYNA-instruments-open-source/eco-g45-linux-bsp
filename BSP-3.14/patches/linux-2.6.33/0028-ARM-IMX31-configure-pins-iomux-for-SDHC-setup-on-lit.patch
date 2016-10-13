@@ -1,0 +1,89 @@
+From d04328b45d330118bd073e15fb417fab05138415 Mon Sep 17 00:00:00 2001
+From: Vladimir Zapolskiy <vzapolskiy@gmail.com>
+Date: Tue, 26 Jan 2010 14:00:40 +0300
+Subject: [PATCH 28/59] ARM: IMX31: configure pins iomux for SDHC setup on litekit board.
+
+This patch adds SDHC support, and corrects current pins setup.
+Added irq handling on card removal.
+
+Signed-off-by: Vladimir Zapolskiy <vzapolskiy@gmail.com>
+Cc: Daniel Mack <daniel@caiaq.de>
+Cc: Sascha Hauer <s.hauer@pengutronix.de>
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+---
+ arch/arm/mach-mx3/mx31lite-db.c |   30 +++++++++++++++++++++---------
+ 1 files changed, 21 insertions(+), 9 deletions(-)
+
+Index: linux-2.6.33/arch/arm/mach-mx3/mx31lite-db.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/mach-mx3/mx31lite-db.c
++++ linux-2.6.33/arch/arm/mach-mx3/mx31lite-db.c
+@@ -67,6 +67,13 @@ static unsigned int litekit_db_board_pin
+ 	MX31_PIN_CSPI1_SS0__SS0,
+ 	MX31_PIN_CSPI1_SS1__SS1,
+ 	MX31_PIN_CSPI1_SS2__SS2,
++	/* SDHC1 */
++	MX31_PIN_SD1_DATA0__SD1_DATA0,
++	MX31_PIN_SD1_DATA1__SD1_DATA1,
++	MX31_PIN_SD1_DATA2__SD1_DATA2,
++	MX31_PIN_SD1_DATA3__SD1_DATA3,
++	MX31_PIN_SD1_CLK__SD1_CLK,
++	MX31_PIN_SD1_CMD__SD1_CMD,
+ };
+ 
+ /* UART */
+@@ -79,11 +86,11 @@ static struct imxuart_platform_data uart
+ static int gpio_det, gpio_wp;
+ 
+ #define MMC_PAD_CFG (PAD_CTL_DRV_MAX | PAD_CTL_SRE_FAST | PAD_CTL_HYS_CMOS | \
+-			PAD_CTL_ODE_CMOS | PAD_CTL_100K_PU)
++		     PAD_CTL_ODE_CMOS)
+ 
+ static int mxc_mmc1_get_ro(struct device *dev)
+ {
+-	return gpio_get_value(IOMUX_TO_GPIO(MX31_PIN_LCS0));
++	return gpio_get_value(IOMUX_TO_GPIO(MX31_PIN_GPIO1_6));
+ }
+ 
+ static int mxc_mmc1_init(struct device *dev,
+@@ -94,12 +101,17 @@ static int mxc_mmc1_init(struct device *
+ 	gpio_det = IOMUX_TO_GPIO(MX31_PIN_DCD_DCE1);
+ 	gpio_wp = IOMUX_TO_GPIO(MX31_PIN_GPIO1_6);
+ 
+-	mxc_iomux_set_pad(MX31_PIN_SD1_DATA0, MMC_PAD_CFG);
+-	mxc_iomux_set_pad(MX31_PIN_SD1_DATA1, MMC_PAD_CFG);
+-	mxc_iomux_set_pad(MX31_PIN_SD1_DATA2, MMC_PAD_CFG);
+-	mxc_iomux_set_pad(MX31_PIN_SD1_DATA3, MMC_PAD_CFG);
++	mxc_iomux_set_pad(MX31_PIN_SD1_DATA0,
++			  MMC_PAD_CFG | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++	mxc_iomux_set_pad(MX31_PIN_SD1_DATA1,
++			  MMC_PAD_CFG | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++	mxc_iomux_set_pad(MX31_PIN_SD1_DATA2,
++			  MMC_PAD_CFG | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++	mxc_iomux_set_pad(MX31_PIN_SD1_DATA3,
++			  MMC_PAD_CFG | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
++	mxc_iomux_set_pad(MX31_PIN_SD1_CMD,
++			  MMC_PAD_CFG | PAD_CTL_PUE_PUD | PAD_CTL_100K_PU);
+ 	mxc_iomux_set_pad(MX31_PIN_SD1_CLK, MMC_PAD_CFG);
+-	mxc_iomux_set_pad(MX31_PIN_SD1_CMD, MMC_PAD_CFG);
+ 
+ 	ret = gpio_request(gpio_det, "MMC detect");
+ 	if (ret)
+@@ -113,7 +125,7 @@ static int mxc_mmc1_init(struct device *
+ 	gpio_direction_input(gpio_wp);
+ 
+ 	ret = request_irq(IOMUX_TO_IRQ(MX31_PIN_DCD_DCE1), detect_irq,
+-			  IRQF_DISABLED | IRQF_TRIGGER_FALLING,
++			  IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+ 			  "MMC detect", data);
+ 	if (ret)
+ 		goto exit_free_wp;
+@@ -133,7 +145,7 @@ static void mxc_mmc1_exit(struct device
+ {
+ 	gpio_free(gpio_det);
+ 	gpio_free(gpio_wp);
+-	free_irq(IOMUX_TO_IRQ(MX31_PIN_GPIO1_1), data);
++	free_irq(IOMUX_TO_IRQ(MX31_PIN_DCD_DCE1), data);
+ }
+ 
+ static struct imxmmc_platform_data mmc_pdata = {

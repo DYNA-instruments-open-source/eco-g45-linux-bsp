@@ -1,0 +1,10 @@
+microwindows-tslib.patch
+add-config-ptx.patch
+compile-fixups.patch
+microwin-miwe.patch
+add-wingdi-image-drawing.patch
+add-rotation-support.patch
+fix-touch-up-problem.patch
+fix-rotation-180-input-coordinates.patch
+fix-bitblt32.patch
+fix-portrait_down-driver.patch

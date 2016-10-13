@@ -1,0 +1,118 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/include/mach/mx3fb.h
++++ linux-2.6.33/arch/arm/plat-mxc/include/mach/mx3fb.h
+@@ -34,6 +34,8 @@ struct mx3fb_platform_data {
+ 	const struct fb_videomode	*mode;
+ 	int				num_modes;
+ 	unsigned long			bpp;
++	u_char * 			fixed_screen_cpu;
++	dma_addr_t 			fixed_screen_dma;
+ };
+ 
+ #endif
+Index: linux-2.6.33/drivers/video/mx3fb.c
+===================================================================
+--- linux-2.6.33.orig/drivers/video/mx3fb.c
++++ linux-2.6.33/drivers/video/mx3fb.c
+@@ -115,6 +115,9 @@
+ #define DI_D3_CLK_SEL_SHIFT		25
+ #define DI_D3_DATAMSK_SHIFT		24
+ 
++static 	u_char * 			fixed_screen_cpu = 0;
++static	dma_addr_t 			fixed_screen_dma = 0;
++
+ enum ipu_panel {
+ 	IPU_PANEL_SHARP_TFT,
+ 	IPU_PANEL_TFT,
+@@ -1233,31 +1236,38 @@ static int mx3fb_map_video_memory(struct
+ 	int retval = 0;
+ 	dma_addr_t addr;
+ 
+-	fbi->screen_base = dma_alloc_writecombine(fbi->device,
+-						  mem_len,
+-						  &addr, GFP_DMA);
+-
+-	if (!fbi->screen_base) {
+-		dev_err(fbi->device, "Cannot allocate %u bytes framebuffer memory\n",
+-			mem_len);
+-		retval = -EBUSY;
+-		goto err0;
+-	}
+-
+-	if (lock)
+-		mutex_lock(&fbi->mm_lock);
+-	fbi->fix.smem_start = addr;
+-	fbi->fix.smem_len = mem_len;
+-	if (lock)
+-		mutex_unlock(&fbi->mm_lock);
++	if(!fixed_screen_cpu) {
++		fbi->screen_base = dma_alloc_writecombine(fbi->device,
++							  mem_len,
++							  &addr, GFP_DMA);
++
++		if (!fbi->screen_base) {
++			dev_err(fbi->device, "Cannot allocate %u bytes framebuffer memory\n",
++				mem_len);
++			retval = -EBUSY;
++			goto err0;
++		}
+ 
+-	dev_dbg(fbi->device, "allocated fb @ p=0x%08x, v=0x%p, size=%d.\n",
+-		(uint32_t) fbi->fix.smem_start, fbi->screen_base, fbi->fix.smem_len);
++		if (lock)
++			mutex_lock(&fbi->mm_lock);
++		fbi->fix.smem_start = addr;
++		fbi->fix.smem_len = mem_len;
++		if (lock)
++			mutex_unlock(&fbi->mm_lock);
+ 
+-	fbi->screen_size = fbi->fix.smem_len;
++		dev_dbg(fbi->device, "allocated fb @ p=0x%08x, v=0x%p, size=%d.\n",
++			(uint32_t) fbi->fix.smem_start, fbi->screen_base, fbi->fix.smem_len);
+ 
+-	/* Clear the screen */
+-	memset((char *)fbi->screen_base, 0, fbi->fix.smem_len);
++		fbi->screen_size = fbi->fix.smem_len;
++	} else {
++		if (lock)
++			mutex_lock(&fbi->mm_lock);
++		fbi->screen_base = fixed_screen_cpu;
++		fbi->fix.smem_start = fixed_screen_dma;
++		fbi->fix.smem_len = mem_len;
++		if (lock)
++			mutex_unlock(&fbi->mm_lock);
++	}
+ 
+ 	return 0;
+ 
+@@ -1479,6 +1489,18 @@ static int mx3fb_probe(struct platform_d
+ 	mx3fb->dev = dev;
+ 	platform_set_drvdata(pdev, mx3fb);
+ 
++	mx3fb_pdata = mx3fb->dev->platform_data;
++
++	if(mx3fb_pdata->bpp)
++		default_bpp = mx3fb_pdata->bpp;
++
++	/* Fixed framebuffer mapping enables location of the screen */
++	if(mx3fb_pdata->fixed_screen_cpu) {
++	    fixed_screen_cpu = mx3fb_pdata->fixed_screen_cpu;
++	    fixed_screen_dma = mx3fb_pdata->fixed_screen_dma;
++	}
++
++
+ 	rq.mx3fb = mx3fb;
+ 
+ 	dma_cap_zero(mask);
+@@ -1497,10 +1519,6 @@ static int mx3fb_probe(struct platform_d
+ 	if (ret < 0)
+ 		goto eisdc0;
+ 
+-	mx3fb_pdata = mx3fb->dev->platform_data;
+-	if(mx3fb_pdata->bpp)
+-		default_bpp = mx3fb_pdata->bpp;
+-
+ 	return 0;
+ 
+ eisdc0:

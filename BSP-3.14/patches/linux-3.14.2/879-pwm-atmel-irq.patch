@@ -1,0 +1,103 @@
+--- a/drivers/pwm/pwm-atmel.c
++++ b/drivers/pwm/pwm-atmel.c
+@@ -16,11 +16,17 @@
+ #include <linux/platform_device.h>
+ #include <linux/pwm.h>
+ #include <linux/slab.h>
++#include <linux/interrupt.h>
+ 
+ /* The following is global registers for PWM controller */
+ #define PWM_ENA			0x04
+ #define PWM_DIS			0x08
+-#define PWM_SR			0x0C
++#define PWM_SR      0x0C
++#define PWM_IER     0x10
++#define PWM_IDR     0x14
++#define PWM_IMR     0x18
++#define PWM_ISR     0x1C
++
+ /* Bit field in SR */
+ #define PWM_SR_ALL_CH_ON	0x0F
+ 
+@@ -63,6 +69,10 @@ struct atmel_pwm_chip {
+ 		       unsigned long dty, unsigned long prd);
+ };
+ 
++static bool use_irq[4] = { false, false, false, false };
++module_param_array(use_irq, bool, 0, 0644);
++MODULE_PARM_DESC(use_irq, "Use period IRQ for one or more channels. This module does nothing special, it just aknowledges the IRQ. This might useful for other IRQ consumers as timer IRQ, like IIO trigger.");
++
+ static inline struct atmel_pwm_chip *to_atmel_pwm_chip(struct pwm_chip *chip)
+ {
+ 	return container_of(chip, struct atmel_pwm_chip, chip);
+@@ -97,6 +107,16 @@ static inline void atmel_pwm_ch_writel(s
+ 	writel_relaxed(val, chip->base + base + offset);
+ }
+ 
++static
++irqreturn_t atmel_pwm_isr(int irq, void *dev_id)
++{
++  struct atmel_pwm_chip *atmel_pwm = dev_id;
++
++  atmel_pwm_readl(atmel_pwm, PWM_ISR);
++
++  return IRQ_HANDLED;
++}
++
+ static int atmel_pwm_config(struct pwm_chip *chip, struct pwm_device *pwm,
+ 			    int duty_ns, int period_ns)
+ {
+@@ -233,16 +253,23 @@ static int atmel_pwm_enable(struct pwm_c
+ 
+ 	atmel_pwm_writel(atmel_pwm, PWM_ENA, 1 << pwm->hwpwm);
+ 
++	if (use_irq[pwm->hwpwm])
++	  atmel_pwm_writel(atmel_pwm, PWM_IER, 1 << pwm->hwpwm);
++
+ 	return 0;
+ }
+ 
+ static void atmel_pwm_disable(struct pwm_chip *chip, struct pwm_device *pwm)
+ {
++  u32 sr;
+ 	struct atmel_pwm_chip *atmel_pwm = to_atmel_pwm_chip(chip);
+ 
++  atmel_pwm_writel(atmel_pwm, PWM_IDR, 1 << pwm->hwpwm);
+ 	atmel_pwm_writel(atmel_pwm, PWM_DIS, 1 << pwm->hwpwm);
++	sr = atmel_pwm_readl(atmel_pwm, PWM_SR);
+ 
+-	clk_disable(atmel_pwm->clk);
++	if (!sr)
++	  clk_disable(atmel_pwm->clk);
+ }
+ 
+ static const struct pwm_ops atmel_pwm_ops = {
+@@ -354,6 +381,19 @@ static int atmel_pwm_probe(struct platfo
+ 	atmel_pwm->chip.npwm = 4;
+ 	atmel_pwm->config = data->config;
+ 
++  if (use_irq[0] || use_irq[1] || use_irq[2] || use_irq[3]) {
++    unsigned int irq = platform_get_irq(pdev, 0);
++    if (0 <= irq) {
++      ret = devm_request_irq(&pdev->dev, irq, atmel_pwm_isr, IRQF_SHARED, dev_name(&pdev->dev), atmel_pwm);
++      if (ret < 0)
++        dev_err(&pdev->dev, "failed to connect to shared IRQ %d\n", irq);
++      else
++        dev_info(&pdev->dev, "installed IRQ handler for IRQ %d\n", irq);
++    }
++    else
++      dev_err(&pdev->dev, "got no IRQ number\n");
++  }
++
+ 	ret = pwmchip_add(&atmel_pwm->chip);
+ 	if (ret < 0) {
+ 		dev_err(&pdev->dev, "failed to add PWM chip %d\n", ret);
+@@ -380,7 +420,7 @@ static int atmel_pwm_remove(struct platf
+ 
+ static struct platform_driver atmel_pwm_driver = {
+ 	.driver = {
+-		.name = "atmel-pwm",
++		.name = "pwm-atmel",
+ 		.of_match_table = of_match_ptr(atmel_pwm_dt_ids),
+ 	},
+ 	.id_table = atmel_pwm_devtypes,

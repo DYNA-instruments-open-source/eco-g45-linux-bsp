@@ -1,0 +1,7 @@
+## SECTION=shell_and_console
+
+config STM32FLASH
+	tristate
+	prompt "stm32flash"
+	help
+	  A boot loader for the STM32 microcontroller family with UART and I2C support and GPIO control.

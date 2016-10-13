@@ -1,0 +1,970 @@
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9g45_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9g45_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9g45_devices.c
+@@ -1331,6 +1331,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -1369,6 +1371,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -1412,6 +1416,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -1455,6 +1461,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1498,6 +1506,8 @@ static struct resource uart3_resources[]
+ static struct atmel_uart_data uart3_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart3_dmamask = DMA_BIT_MASK(32);
+@@ -1528,7 +1538,8 @@ static inline void configure_usart3_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1539,18 +1550,38 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91SAM9G45_ID_US0:
+ 			pdev = &at91sam9g45_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91SAM9G45_ID_US1:
+ 			pdev = &at91sam9g45_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91SAM9G45_ID_US2:
+ 			pdev = &at91sam9g45_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		case AT91SAM9G45_ID_US3:
+ 			pdev = &at91sam9g45_uart3_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart3_data.cts_pin = gpio_cts;
++				uart3_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart3_pins(pins);
+ 			break;
+ 		default:
+@@ -1583,7 +1614,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/include/mach/board.h
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/include/mach/board.h
++++ linux-2.6.39/arch/arm/mach-at91/include/mach/board.h
+@@ -144,7 +144,8 @@ extern void __init at91_add_device_spi(s
+ #define ATMEL_UART_DCD	0x10
+ #define ATMEL_UART_RI	0x20
+ 
+-extern void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins);
++extern void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts);
+ extern void __init at91_set_serial_console(unsigned portnr);
+ 
+ extern struct platform_device *atmel_default_console_device;
+@@ -154,6 +155,8 @@ struct atmel_uart_data {
+ 	short			use_dma_rx;	/* use receive DMA? */
+ 	void __iomem		*regs;		/* virt. base address, if any */
+ 	struct serial_rs485	rs485;		/* rs485 settings */
++	int cts_pin;
++	int rts_pin;
+ };
+ extern void __init at91_add_device_serial(void);
+ 
+Index: linux-2.6.39/drivers/tty/serial/atmel_serial.c
+===================================================================
+--- linux-2.6.39.orig/drivers/tty/serial/atmel_serial.c
++++ linux-2.6.39/drivers/tty/serial/atmel_serial.c
+@@ -51,6 +51,8 @@
+ #include <mach/gpio.h>
+ #endif
+ 
++#define DRV_NAME "atmel_usart"
++
+ #define PDC_BUFFER_SIZE		512
+ /* Revisit: We should calculate this based on the actual port settings */
+ #define PDC_RX_TIMEOUT		(3 * 10)		/* 3 bytes */
+@@ -156,6 +158,9 @@ struct atmel_uart_port {
+ 
+ 	struct serial_rs485	rs485;		/* rs485 settings */
+ 	unsigned int		tx_done_mask;
++
++	int cts_pin;
++	int rts_pin;
+ };
+ 
+ static struct atmel_uart_port atmel_ports[ATMEL_MAX_UART];
+@@ -268,11 +273,17 @@ static void atmel_set_mctrl(struct uart_
+ 		}
+ 	}
+ #endif
+-
+-	if (mctrl & TIOCM_RTS)
+-		control |= ATMEL_US_RTSEN;
+-	else
+-		control |= ATMEL_US_RTSDIS;
++	if(atmel_port->rts_pin >= 0) {
++		if (mctrl & TIOCM_RTS)
++               ATMEL_US_ENABLE_RTS(atmel_port);
++       else
++               ATMEL_US_DISABLE_RTS(atmel_port);
++	} else {
++		if (mctrl & TIOCM_RTS)
++			control |= ATMEL_US_RTSEN;
++		else
++			control |= ATMEL_US_RTSDIS;
++	}
+ 
+ 	if (mctrl & TIOCM_DTR)
+ 		control |= ATMEL_US_DTREN;
+@@ -308,6 +319,7 @@ static void atmel_set_mctrl(struct uart_
+  */
+ static u_int atmel_get_mctrl(struct uart_port *port)
+ {
++	struct atmel_uart_port *atmel_port = to_atmel_uart_port(port);
+ 	unsigned int status, ret = 0;
+ 
+ 	status = UART_GET_CSR(port);
+@@ -317,8 +329,13 @@ static u_int atmel_get_mctrl(struct uart
+ 	 */
+ 	if (!(status & ATMEL_US_DCD))
+ 		ret |= TIOCM_CD;
+-	if (!(status & ATMEL_US_CTS))
+-		ret |= TIOCM_CTS;
++	if(atmel_port->cts_pin >= 0) {
++		if (ATMEL_US_GET_CTS(atmel_port))
++			ret |= TIOCM_CTS;
++	} else {
++		if (!(status & ATMEL_US_CTS))
++			ret |= TIOCM_CTS;
++	}
+ 	if (!(status & ATMEL_US_DSR))
+ 		ret |= TIOCM_DSR;
+ 	if (!(status & ATMEL_US_RI))
+@@ -642,6 +659,20 @@ static irqreturn_t atmel_interrupt(int i
+ }
+ 
+ /*
++ * CTS Interrupt handler
++ */
++static irqreturn_t atmel_cts_interrupt(int irq, void *dev_id)
++{
++	struct uart_port *port = dev_id;
++	unsigned int status;
++
++	status = atmel_get_mctrl(port);
++	uart_handle_cts_change(port, status & TIOCM_CTS);
++
++	return IRQ_HANDLED;
++}
++
++/*
+  * Called from tasklet with ENDTX and TXBUFE interrupts disabled.
+  */
+ static void atmel_tx_dma(struct uart_port *port)
+@@ -909,6 +940,27 @@ static int atmel_startup(struct uart_por
+ 	}
+ 
+ 	/*
++	 * Request CTS IRQ if configured
++	 */
++	if(atmel_port->cts_pin >= 0) {
++		retval =  request_irq(gpio_to_irq(atmel_port->cts_pin),
++				atmel_cts_interrupt,
++				IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING |
++				IRQF_DISABLED, "atmel_serial_cts", port);
++		if (retval) {
++			printk("atmel_serial: atmel_startup - Can't get cts irq\n");
++			free_irq(port->irq, port);
++			return retval;
++		}
++	}
++
++	/*
++	 * Initialize RTS GPIO if configured
++	 */
++	if(atmel_port->rts_pin >= 0)
++		gpio_direction_output(atmel_port->rts_pin, 0);
++
++	/*
+ 	 * Initialize DMA (if necessary)
+ 	 */
+ 	if (atmel_use_dma_rx(port)) {
+@@ -926,6 +978,8 @@ static int atmel_startup(struct uart_por
+ 						DMA_FROM_DEVICE);
+ 					kfree(atmel_port->pdc_rx[0].buf);
+ 				}
++				if (atmel_port->cts_pin >= 0)
++					free_irq(gpio_to_irq(atmel_port->cts_pin), port);
+ 				free_irq(port->irq, port);
+ 				return -ENOMEM;
+ 			}
+@@ -965,6 +1019,8 @@ static int atmel_startup(struct uart_por
+ 	if (atmel_open_hook) {
+ 		retval = atmel_open_hook(port);
+ 		if (retval) {
++			if (atmel_port->cts_pin >= 0)
++				free_irq(gpio_to_irq(atmel_port->cts_pin), port);
+ 			free_irq(port->irq, port);
+ 			return retval;
+ 		}
+@@ -1046,6 +1102,12 @@ static void atmel_shutdown(struct uart_p
+ 	free_irq(port->irq, port);
+ 
+ 	/*
++	 * Free CTS interrupt if configured
++	 */
++	if (atmel_port->cts_pin >= 0)
++		free_irq(gpio_to_irq(atmel_port->cts_pin), port);
++
++	/*
+ 	 * If there is a specific "close" function (to unregister
+ 	 * control line interrupts)
+ 	 */
+@@ -1161,7 +1223,7 @@ static void atmel_set_termios(struct uar
+ 		mode |= ATMEL_US_PAR_NONE;
+ 
+ 	/* hardware handshake (RTS/CTS) */
+-	if (termios->c_cflag & CRTSCTS)
++	if (termios->c_cflag & CRTSCTS && (atmel_port->cts_pin < 0 || atmel_port->rts_pin < 0))
+ 		mode |= ATMEL_US_USMODE_HWHS;
+ 	else
+ 		mode |= ATMEL_US_USMODE_NORMAL;
+@@ -1461,6 +1523,14 @@ static void __devinit atmel_init_port(st
+ 	} else {
+ 		atmel_port->tx_done_mask = ATMEL_US_TXRDY;
+ 	}
++	if(data->cts_pin <= 0 || data->rts_pin <= 0) {
++		atmel_port->cts_pin = -1;
++		atmel_port->rts_pin = -1;
++	} else {
++		atmel_port->cts_pin = data->cts_pin;
++		atmel_port->rts_pin = data->rts_pin;
++		gpio_request(atmel_port->rts_pin, DRV_NAME);
++	}
+ }
+ 
+ /*
+@@ -1783,6 +1853,9 @@ static int __devexit atmel_serial_remove
+ 
+ 	/* "port" is allocated statically, so we shouldn't free it */
+ 
++	if(atmel_port->rts_pin >= 0)
++		gpio_free(atmel_port->rts_pin);
++
+ 	clk_put(atmel_port->clk);
+ 
+ 	return ret;
+@@ -1794,7 +1867,7 @@ static struct platform_driver atmel_seri
+ 	.suspend	= atmel_serial_suspend,
+ 	.resume		= atmel_serial_resume,
+ 	.driver		= {
+-		.name	= "atmel_usart",
++		.name	= DRV_NAME,
+ 		.owner	= THIS_MODULE,
+ 	},
+ };
+Index: linux-2.6.39/include/linux/atmel_serial.h
+===================================================================
+--- linux-2.6.39.orig/include/linux/atmel_serial.h
++++ linux-2.6.39/include/linux/atmel_serial.h
+@@ -124,4 +124,8 @@
+ #define ATMEL_US_NER		0x44			/* Number of Errors Register */
+ #define ATMEL_US_IF		0x4c			/* IrDA Filter Register */
+ 
++#define ATMEL_US_GET_CTS(x)          gpio_get_value(x->cts_pin)
++#define ATMEL_US_DISABLE_RTS(x)      gpio_set_value(x->rts_pin, 1)
++#define ATMEL_US_ENABLE_RTS(x)       gpio_set_value(x->rts_pin, 0)
++
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91cap9_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91cap9_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91cap9_devices.c
+@@ -1030,6 +1030,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -1068,6 +1070,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -1111,6 +1115,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -1154,6 +1160,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1184,7 +1192,8 @@ static inline void configure_usart2_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1195,14 +1204,29 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91CAP9_ID_US0:
+ 			pdev = &at91cap9_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91CAP9_ID_US1:
+ 			pdev = &at91cap9_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91CAP9_ID_US2:
+ 			pdev = &at91cap9_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		default:
+@@ -1235,7 +1259,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91rm9200_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91rm9200_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91rm9200_devices.c
+@@ -884,6 +884,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -922,6 +924,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -971,6 +975,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -1022,6 +1028,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1065,6 +1073,8 @@ static struct resource uart3_resources[]
+ static struct atmel_uart_data uart3_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart3_dmamask = DMA_BIT_MASK(32);
+@@ -1095,7 +1105,8 @@ static inline void configure_usart3_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1106,18 +1117,38 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91RM9200_ID_US0:
+ 			pdev = &at91rm9200_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91RM9200_ID_US1:
+ 			pdev = &at91rm9200_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91RM9200_ID_US2:
+ 			pdev = &at91rm9200_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		case AT91RM9200_ID_US3:
+ 			pdev = &at91rm9200_uart3_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart3_data.cts_pin = gpio_cts;
++				uart3_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart3_pins(pins);
+ 			break;
+ 		default:
+@@ -1151,7 +1182,8 @@ void __init at91_add_device_serial(void)
+ }
+ #else
+ void __init __deprecated at91_init_serial(struct at91_uart_config *config) {}
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9rl_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9rl_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9rl_devices.c
+@@ -923,6 +923,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -961,6 +963,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -1012,6 +1016,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -1055,6 +1061,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1098,6 +1106,8 @@ static struct resource uart3_resources[]
+ static struct atmel_uart_data uart3_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart3_dmamask = DMA_BIT_MASK(32);
+@@ -1128,7 +1138,8 @@ static inline void configure_usart3_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1139,18 +1150,38 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91SAM9RL_ID_US0:
+ 			pdev = &at91sam9rl_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91SAM9RL_ID_US1:
+ 			pdev = &at91sam9rl_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91SAM9RL_ID_US2:
+ 			pdev = &at91sam9rl_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		case AT91SAM9RL_ID_US3:
+ 			pdev = &at91sam9rl_uart3_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart3_data.cts_pin = gpio_cts;
++				uart3_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart3_pins(pins);
+ 			break;
+ 		default:
+@@ -1183,7 +1214,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9260_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9260_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9260_devices.c
+@@ -844,6 +844,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -882,6 +884,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -933,6 +937,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -976,6 +982,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1019,6 +1027,8 @@ static struct resource uart3_resources[]
+ static struct atmel_uart_data uart3_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart3_dmamask = DMA_BIT_MASK(32);
+@@ -1062,6 +1072,8 @@ static struct resource uart4_resources[]
+ static struct atmel_uart_data uart4_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart4_dmamask = DMA_BIT_MASK(32);
+@@ -1100,6 +1112,8 @@ static struct resource uart5_resources[]
+ static struct atmel_uart_data uart5_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart5_dmamask = DMA_BIT_MASK(32);
+@@ -1125,7 +1139,8 @@ static inline void configure_usart5_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1136,27 +1151,57 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91SAM9260_ID_US0:
+ 			pdev = &at91sam9260_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91SAM9260_ID_US1:
+ 			pdev = &at91sam9260_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91SAM9260_ID_US2:
+ 			pdev = &at91sam9260_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		case AT91SAM9260_ID_US3:
+ 			pdev = &at91sam9260_uart3_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart3_data.cts_pin = gpio_cts;
++				uart3_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart3_pins(pins);
+ 			break;
+ 		case AT91SAM9260_ID_US4:
+ 			pdev = &at91sam9260_uart4_device;
+-			configure_usart4_pins();
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart4_data.cts_pin = gpio_cts;
++				uart4_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
++			configure_usart4_pins(pins);
+ 			break;
+ 		case AT91SAM9260_ID_US5:
+ 			pdev = &at91sam9260_uart5_device;
+-			configure_usart5_pins();
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart5_data.cts_pin = gpio_cts;
++				uart5_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
++			configure_usart5_pins(pins);
+ 			break;
+ 		default:
+ 			return;
+@@ -1188,7 +1233,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9261_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9261_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9261_devices.c
+@@ -823,6 +823,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -861,6 +863,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -904,6 +908,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -947,6 +953,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -977,7 +985,8 @@ static inline void configure_usart2_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -988,14 +997,29 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91SAM9261_ID_US0:
+ 			pdev = &at91sam9261_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91SAM9261_ID_US1:
+ 			pdev = &at91sam9261_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91SAM9261_ID_US2:
+ 			pdev = &at91sam9261_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		default:
+@@ -1028,7 +1052,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif
+Index: linux-2.6.39/arch/arm/mach-at91/at91sam9263_devices.c
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/at91sam9263_devices.c
++++ linux-2.6.39/arch/arm/mach-at91/at91sam9263_devices.c
+@@ -1205,6 +1205,8 @@ static struct atmel_uart_data dbgu_data
+ 	.use_dma_tx	= 0,
+ 	.use_dma_rx	= 0,		/* DBGU not capable of receive DMA */
+ 	.regs		= (void __iomem *)(AT91_VA_BASE_SYS + AT91_DBGU),
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 dbgu_dmamask = DMA_BIT_MASK(32);
+@@ -1243,6 +1245,8 @@ static struct resource uart0_resources[]
+ static struct atmel_uart_data uart0_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart0_dmamask = DMA_BIT_MASK(32);
+@@ -1286,6 +1290,8 @@ static struct resource uart1_resources[]
+ static struct atmel_uart_data uart1_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart1_dmamask = DMA_BIT_MASK(32);
+@@ -1329,6 +1335,8 @@ static struct resource uart2_resources[]
+ static struct atmel_uart_data uart2_data = {
+ 	.use_dma_tx	= 1,
+ 	.use_dma_rx	= 1,
++	.cts_pin = -1,
++	.rts_pin = -1,
+ };
+ 
+ static u64 uart2_dmamask = DMA_BIT_MASK(32);
+@@ -1359,7 +1367,8 @@ static inline void configure_usart2_pins
+ static struct platform_device *__initdata at91_uarts[ATMEL_MAX_UART];	/* the UARTs to use */
+ struct platform_device *atmel_default_console_device;	/* the serial console device */
+ 
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins)
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)
+ {
+ 	struct platform_device *pdev;
+ 
+@@ -1370,14 +1379,29 @@ void __init at91_register_uart(unsigned
+ 			break;
+ 		case AT91SAM9263_ID_US0:
+ 			pdev = &at91sam9263_uart0_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart0_data.cts_pin = gpio_cts;
++				uart0_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart0_pins(pins);
+ 			break;
+ 		case AT91SAM9263_ID_US1:
+ 			pdev = &at91sam9263_uart1_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart1_data.cts_pin = gpio_cts;
++				uart1_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart1_pins(pins);
+ 			break;
+ 		case AT91SAM9263_ID_US2:
+ 			pdev = &at91sam9263_uart2_device;
++			if(gpio_cts >= 0 && gpio_rts >= 0) {
++				uart2_data.cts_pin = gpio_cts;
++				uart2_data.rts_pin = gpio_rts;
++				pins &= ~(ATMEL_UART_CTS | ATMEL_UART_RTS);
++			}
+ 			configure_usart2_pins(pins);
+ 			break;
+ 		default:
+@@ -1410,7 +1434,8 @@ void __init at91_add_device_serial(void)
+ 		printk(KERN_INFO "AT91: No default serial console defined.\n");
+ }
+ #else
+-void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
++void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins,
++								int gpio_cts, int gpio_rts)) {}
+ void __init at91_set_serial_console(unsigned portnr) {}
+ void __init at91_add_device_serial(void) {}
+ #endif

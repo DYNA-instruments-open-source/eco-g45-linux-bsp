@@ -1,0 +1,51 @@
+Index: linux-2.6.39/arch/arm/mach-at91/include/mach/at91sam9g45.h
+===================================================================
+--- linux-2.6.39.orig/arch/arm/mach-at91/include/mach/at91sam9g45.h
++++ linux-2.6.39/arch/arm/mach-at91/include/mach/at91sam9g45.h
+@@ -108,6 +108,7 @@
+ #define AT91_RTT	(0xfffffd20 - AT91_BASE_SYS)
+ #define AT91_PIT	(0xfffffd30 - AT91_BASE_SYS)
+ #define AT91_WDT	(0xfffffd40 - AT91_BASE_SYS)
++#define AT91_SCKCR	(0xfffffd50 - AT91_BASE_SYS)
+ #define AT91_GPBR	(0xfffffd60 - AT91_BASE_SYS)
+ #define AT91_RTC	(0xfffffdb0 - AT91_BASE_SYS)
+ 
+Index: linux-2.6.39/drivers/rtc/rtc-at91rm9200.c
+===================================================================
+--- linux-2.6.39.orig/drivers/rtc/rtc-at91rm9200.c
++++ linux-2.6.39/drivers/rtc/rtc-at91rm9200.c
+@@ -27,10 +27,12 @@
+ #include <linux/interrupt.h>
+ #include <linux/ioctl.h>
+ #include <linux/completion.h>
++#include <linux/delay.h>
+ 
+ #include <asm/uaccess.h>
+ 
+ #include <mach/at91_rtc.h>
++#include <mach/cpu.h>
+ 
+ 
+ #define AT91_RTC_EPOCH		1900UL	/* just like arch/arm/common/rtctime.c */
+@@ -257,6 +259,21 @@ static int __init at91_rtc_probe(struct
+ {
+ 	struct rtc_device *rtc;
+ 	int ret;
++	unsigned int sckcr;
++
++	/* Switch from Internal RC Oscillator to the 32768 Hz Crystal */
++	if(cpu_is_at91sam9g45()) {
++		sckcr = at91_sys_read(AT91_SCKCR);
++		if(sckcr != (unsigned int) 0x0000000A) {
++			sckcr |= 0x00000002;  /* enable the 32768 Hz oscillator */
++			msleep(900); /* start up time required */
++			sckcr |= 0x00000008; /* switch from internal RC to 32768 Hz */
++			at91_sys_write(AT91_SCKCR, sckcr);
++			msleep(1);
++			sckcr &= ~(unsigned int) 0x00000001;
++			at91_sys_write(AT91_SCKCR, sckcr);
++		}
++	}
+ 
+ 	at91_sys_write(AT91_RTC_CR, 0);
+ 	at91_sys_write(AT91_RTC_MR, 0);		/* 24 hour mode */

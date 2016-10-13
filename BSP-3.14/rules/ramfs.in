@@ -1,0 +1,8 @@
+## SECTION=rootfs
+
+config RAMFS
+	tristate
+	prompt "Mount battery-backed SRAM to /mnt/sram"
+	help
+	  This option mounts the battery-backed SRAM as MTD device /dev/mtdblock0
+	  to /dev/sram. It uses a JFFS2 file system. If not present it will be created.

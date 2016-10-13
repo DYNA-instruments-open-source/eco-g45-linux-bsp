@@ -1,0 +1,57 @@
+## SECTION=hosttools
+
+menuconfig HOST_SAM_BA
+	bool
+	prompt "ATMEL SAM-BA"
+
+if HOST_SAM_BA
+
+config HOST_SAM_BA_CROSS_COMPILE
+	string
+	default "/opt/sourcery_toolchains/arm-2008q3/bin/arm-none-eabi-"
+	prompt "cross compile prefix"
+
+config HOST_SAM_BA_CHIP
+	string
+	default "at91sam9m10"
+	prompt "chip"
+
+config HOST_SAM_BA_BOARD
+	string
+	default "at91sam9m10-ek"
+	prompt "board"
+
+menu "applets                     "
+
+config HOST_SAM_BA_APPLETS_DATAFLASH
+	bool
+	prompt "dataflash applet"
+
+config HOST_SAM_BA_APPLETS_EEPROM
+	bool
+	prompt "eeprom applet"
+
+config HOST_SAM_BA_APPLETS_EXTRAM
+	bool
+	prompt "external RAM"
+
+config HOST_SAM_BA_APPLETS_LOWLEVELINIT
+	bool
+	prompt "lowlevelinit applet"
+
+config HOST_SAM_BA_APPLETS_NANDFLASH
+	bool
+	prompt "NAND flash applet"
+
+config HOST_SAM_BA_APPLETS_NORFLASH
+	bool
+	prompt "NOR flash applet"
+
+config HOST_SAM_BA_APPLETS_SERIALFLASH
+	bool
+	prompt "seral flash applet"
+
+endmenu
+
+endif
+

@@ -1,0 +1,9 @@
+# release/0.3.4..master (cb3ed9b..aac9f35)
+0001-clarify-licence-information-GPLv3-or-later.patch
+0002-Restore-default-SIGCHLD-handler-for-spawned-processe.patch
+0003-Set-TH_DEVICE-environment-variable-so-that-triggers-.patch
+0004-remove-leading-whitespaces-from-command-lines.patch
+# https://github.com/wertarbyte/triggerhappy/issues/3
+0005-fix-failure-to-detect-linux-input.h-path-with-gcc-4.8.0.patch
+# cross-compile fix
+0006-fix-failure-to-detect-linux-input.h-path-with-cross-gcc.patch

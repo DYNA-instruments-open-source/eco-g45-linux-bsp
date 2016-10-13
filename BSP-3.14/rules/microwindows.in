@@ -1,0 +1,541 @@
+## SECTION=graphics_and_multimedia
+
+menuconfig MICROWINDOWS
+	bool
+	select LIBJPEG		if MICROWINDOWS_JPEG
+	select LIBPNG		if MICROWINDOWS_PNG
+	select FREETYPE		if MICROWINDOWS_FONT_FREETYPE2
+	select ZLIB			if MICROWINDOWS_FONT_PCF
+	select TSLIB		if MICROWINDOWS_MOUSE_TSLIB
+prompt "Microwindows/Nano-X"
+help
+	The Microwindows/Nano-X library
+
+if MICROWINDOWS
+
+menu "build options               "
+
+config MICROWINDOWS_OPTIMIZE
+	bool
+	prompt "compile optimized"
+	help
+	  Select y here, if Micicrowindows/Nano-X should be built with -O3.
+
+config MICROWINDOWS_DEBUG
+	bool
+	prompt "compile with debug info"
+	help
+	  Select y here, if Micicrowindows/Nano-X should be built with debugging symbols.
+
+config MICROWINDOWS_VERBOSE
+	bool
+	prompt "compile with verbose messages"
+	help
+	  Select y here, if Micicrowindows/Nano-X should be built with verbose messages.
+
+config MICROWINDOWS_THREADSAFE
+	bool
+	prompt "compile threadsafe"
+	help
+	  Select y here, if Micicrowindows/Nano-X should be built threadsafe.
+
+endmenu
+
+menu "feature options             "
+
+comment "------ APIs ------------------------"
+
+config MICROWINDOWS_MICROWIN
+	bool
+	prompt "enable Microwindows API"
+	help
+	  Select y here, if Micicrowindows API should be enabled.
+
+config MICROWINDOWS_NANOX
+	bool
+	prompt "enable Nano-X API"
+	help
+	  Select y here, if Nano-X API should be enabled.
+
+config MICROWINDOWS_NWIDGET
+	bool
+	prompt "enable Nanowidget API"
+	help
+	  Select y here, if Nanowidget API should be enabled.
+
+config MICROWINDOWS_OBJECTFRAMEWORK
+	bool
+	prompt "enable Objectframework API"
+	help
+	  Select y here, if Objectframework API should be enabled.
+
+comment "------ image formats ---------------"
+
+config MICROWINDOWS_BMP
+	bool
+	prompt "enable BMP reading support"
+	help
+	  Select y here, if BMP reading should be enabled.
+
+config MICROWINDOWS_GIF
+	bool
+	prompt "enable GIF reading support"
+	help
+	  Select y here, if GIF reading should be enabled.
+
+config MICROWINDOWS_PNM
+	bool
+	prompt "enable PNM reading support"
+	help
+	  Select y here, if PNM reading should be enabled.
+
+config MICROWINDOWS_XPM
+	bool
+	prompt "enable XPM reading support"
+	help
+	  Select y here, if XPM reading should be enabled.
+
+config MICROWINDOWS_JPEG
+	bool
+	prompt "enable JPEG reading support"
+	help
+	  Select y here, if JPEG reading should be enabled.
+
+config MICROWINDOWS_PNG
+	bool
+	prompt "enable PNG reading support"
+	help
+	  Select y here, if PNG reading should be enabled.
+#
+# currently not supported
+#
+#config MICROWINDOWS_TIFF
+#	bool
+#	select LIBTIFF
+#	prompt "enable TIFF reading support"
+#	help
+#	  Select y here, if TIFF reading should be enabled.
+
+comment "------ font loading ----------------"
+
+config MICROWINDOWS_FONT_NATIVE
+	bool
+	prompt "native   "
+	help
+	  Native font loading.
+
+if MICROWINDOWS_FONT_NATIVE
+
+config MICROWINDOWS_FONT_NATIVE_GZIP
+	bool
+	prompt "support native gzipped fonts"
+	help
+	  Select y here, if gzipped native fonts should be supported.
+
+
+config MICROWINDOWS_FONT_NATIVE_DIRECTORY
+	string
+	default "/usr/share/fonts/bdf"
+	prompt "native font directory"
+	help
+	  Enter here the native font directory.
+
+endif
+
+#
+# currently not supported
+#
+#config MICROWINDOWS_FONT_T1
+#	bool
+#	select LIBT1
+#	prompt "type1    "
+#	help
+#	  Adobe Type 1 font loading.
+
+#
+# currently not supported
+#
+#config MICROWINDOWS_FONT_FREETYPE
+#	bool
+#	prompt "freetype1"
+#	help
+#	  Freetype 1 TrueType font loading.
+#
+#if MICROWINDOWS_FONT_FREETYPE
+#
+#config MICROWINDOWS_FONT_FREETYPE_DIRECTORY
+#	string
+#	default "/usr/share/fonts/truetype"
+#	prompt "freetype font directory"
+#	help
+#	  Enter here the freetype font directory.
+#
+#endif
+
+config MICROWINDOWS_FONT_FREETYPE2
+	bool
+	prompt "freetype2"
+	help
+	  Freetype 2 TrueType font loading.
+
+if MICROWINDOWS_FONT_FREETYPE2
+
+config MICROWINDOWS_FONT_FREETYPE2_DIRECTORY
+	string
+	default "/usr/share/fonts/truetype"
+	prompt "freetype2 font directory"
+	help
+	  Enter here the freetype2 font directory.
+
+endif
+
+config MICROWINDOWS_FONT_PCF
+	bool
+	prompt "pcf      "
+	help
+	  PCF font loading.
+
+if MICROWINDOWS_FONT_PCF
+
+config MICROWINDOWS_FONT_PCF_GZIP
+	bool
+	prompt "support pcf gzipped fonts"
+	help
+	  Select y here, if gzipped pcf fonts should be supported.
+
+
+config MICROWINDOWS_FONT_PCF_DIRECTORY
+	string
+	default "/usr/share/fonts/pcf"
+	prompt "pcf font directory"
+	help
+	  Enter here the pcf font directory.
+
+endif
+
+config MICROWINDOWS_FONT_HZK
+	bool
+	prompt "hzk      "
+	help
+	  Chineese Han Zi Ku font loading.
+
+if MICROWINDOWS_FONT_HZK
+
+config MICROWINDOWS_FONT_HZK_DIRECTORY
+	string
+	default "/usr/share/fonts/chineese"
+	prompt "hzk font directory"
+	help
+	  Enter here the hzk font directory.
+
+endif
+
+config MICROWINDOWS_FONT_BIG5
+	bool
+	prompt "big5     "
+	help
+	  Chineese BIG5 compiled in font.
+
+config MICROWINDOWS_FONT_GB2312
+	bool
+	prompt "gb2312    "
+	help
+	  Chineese BGB2312 compiled in font.
+
+config MICROWINDOWS_FONT_JISX0213
+	bool
+	prompt "jisx0213  "
+	help
+	  Japanese JISX0213 compiled in font.
+
+config MICROWINDOWS_FONT_EUCJP
+	bool
+	prompt "eucjp     "
+	help
+	  Japanese EUCJP font loading.
+
+if MICROWINDOWS_FONT_EUCJP
+
+config MICROWINDOWS_FONT_EUCJP_DIRECTORY
+	string
+	default "/usr/share/fonts/japanese"
+	prompt "eucjp font directory"
+	help
+	  Enter here the eucjp font directory.
+
+endif
+
+config MICROWINDOWS_FONT_KSC5601
+	bool
+	prompt "ksc5601  "
+	help
+	  Korean KSC5601 compiled in font.
+
+comment "------ misc ------------------------"
+
+config MICROWINDOWS_SHARED
+	bool
+	prompt "build shared libraries"
+	help
+	  Select y here, if shared libraries should be built.
+
+config MICROWINDOWS_SHAREDMEM
+	bool
+	prompt "enable shared memory support"
+	help
+	  Select y here, if shared memory should be enabled.
+
+config MICROWINDOWS_FILEIO
+	bool
+	prompt "enable file I/O support"
+	help
+	  Select y here, if file I/O should be enabled.
+
+config MICROWINDOWS_ERASEMOVE
+	bool
+	prompt "erasemove"
+	help
+	  Select y here, if only background should repaint while dragging
+
+config MICROWINDOWS_UPDATEREGIONS
+	bool
+	prompt "update regions"
+	help
+	  Select y here, if only in update clipping region should be paint.
+
+endmenu
+
+menu "demos and apps              "
+
+if MICROWINDOWS_MICROWIN
+
+config MICROWINDOWS_MICROWINDEMO
+	bool
+	prompt "build microwindows demos"
+	help
+	  Select y here, if the Nicrowindows API demos should be build.
+
+endif
+
+if MICROWINDOWS_NANOX
+
+config MICROWINDOWS_NANOXDEMO
+	bool
+	prompt "build Nano-X demos"
+	help
+	  Select y here, if the Nano-X API demos should be build.
+
+config MICROWINDOWS_NANOWM
+	bool
+	prompt "build Nanowm window manager"
+	help
+	  Select y here, if the Nanowm window manager should be build.
+
+endif
+
+endmenu
+
+if MICROWINDOWS_MICROWIN || MICROWINDOWS_NANOX
+
+choice
+prompt "screen pixel type"
+default MICROWINDOWS_SCREENPIXELTYPE_PALETTE
+help
+  Screen pixel type.
+
+config MICROWINDOWS_SCREENPIXELTYPE_PALETTE
+	bool
+	prompt "palette "
+	help
+	  Pixel is packed 8 bits 1, 4 or 8 pal index.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR8888
+	bool
+	prompt "RGB8888 "
+	help
+	  Pixel is packed 32 bits 8/8/8/8 truecolor with alpha.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR0888
+	bool
+	prompt "RGB0888 "
+	help
+	  Pixel is packed 32 bits 0/8/8/8 truecolor.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR888
+	bool
+	prompt "RGB888 "
+	help
+	  Pixel is packed 24 bits 8/8/8 truecolor.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR565
+	bool
+	prompt "RGB565 "
+	help
+	  Pixel is packed 16 bits 5/6/5 truecolor.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR555
+	bool
+	prompt "RGB555 "
+	help
+	  Pixel is packed 16 bits 5/5/5 truecolor.
+
+config MICROWINDOWS_SCREENPIXELTYPE_TRUECOLOR332
+	bool
+	prompt "RGB332 "
+	help
+	  Pixel is packed 8 bits 5/5/5 truecolor.
+
+endchoice
+
+choice
+	prompt "mouse driver"
+	default MICROWINDOWS_MOUSE_NOMOUSE
+	help
+	  Mose driver.
+
+config MICROWINDOWS_MOUSE_NOMOUSE
+	bool
+	prompt "no mouse driver"
+	help
+	  No mouse driver.
+
+config MICROWINDOWS_MOUSE_GPM
+	bool
+	prompt "GPM mouse driver"
+	help
+	  GPM mouse driver.
+
+config MICROWINDOWS_MOUSE_SER
+	bool
+	prompt "serial mouse driver"
+	help
+	  Serial mouse driver.
+
+config MICROWINDOWS_MOUSE_SUN
+	bool
+	prompt "Sun mouse driver"
+	help
+	  Sun mouse driver.
+
+config MICROWINDOWS_MOUSE_IPAQ
+	bool
+	prompt "ipaq mouse driver"
+	help
+	  Ipaq mouse driver.
+
+config MICROWINDOWS_MOUSE_ZAURUS
+	bool
+	prompt "Zaurus mouse driver"
+	help
+	  Zaurus mouse driver.
+
+config MICROWINDOWS_MOUSE_TUX
+	bool
+	prompt "Tux mouse driver"
+	help
+	  Tux mouse driver.
+
+config MICROWINDOWS_MOUSE_ADS
+	bool
+	prompt "ADS mouse driver"
+	help
+	  ADS mouse driver.
+
+config MICROWINDOWS_MOUSE_EP
+	bool
+	prompt "EP mouse driver"
+	help
+	  EP mouse driver.
+
+config MICROWINDOWS_MOUSE_VH
+	bool
+	prompt "VH mouse driver"
+	help
+	  VH mouse driver.
+
+config MICROWINDOWS_MOUSE_MT
+	bool
+	prompt "MT mouse driver"
+	help
+	  MT mouse driver.
+
+config MICROWINDOWS_MOUSE_PSION
+	bool
+	prompt "Psion mouse driver"
+	help
+	  Psion mouse driver.
+
+config MICROWINDOWS_MOUSE_YOPY
+	bool
+	prompt "Yopy mouse driver"
+	help
+	  Yopi mouse driver.
+
+config MICROWINDOWS_MOUSE_HARRIER
+	bool
+	prompt "Harrier mouse driver"
+	help
+	  Harrier mouse driver.
+
+config MICROWINDOWS_MOUSE_TSLIB
+	bool
+	prompt "tslib mouse driver"
+	help
+	  Tslib mouse driver.
+
+endchoice
+
+choice
+	prompt "keyboard driver"
+	default MICROWINDOWS_KBD_NOKBD
+	help
+	  Keybaord driver.
+
+config MICROWINDOWS_KBD_NOKBD
+	bool
+	prompt "no keybaord driver"
+	help
+	  No keyboard driver.
+
+config MICROWINDOWS_KBD_TTY
+	bool
+	prompt "tty driver"
+	help
+	  Tty driver.
+
+config MICROWINDOWS_KBD_SCAN
+	bool
+	prompt "scan keybaord driver"
+	help
+	  Scan driver.
+
+config MICROWINDOWS_KBD_ZAURUS
+	bool
+	prompt "zaurus keybaord driver"
+	help
+	  Zaurus keyboard driver.
+
+config MICROWINDOWS_KBD_PIPE
+	bool
+	prompt "pipe driver"
+	help
+	  Pipe driver.
+
+config MICROWINDOWS_KBD_IPAQ
+	bool
+	prompt "ipaq keybaord driver"
+	help
+	  Ipaq keyboard driver.
+
+config MICROWINDOWS_KBD_LIRC
+	bool
+	prompt "lirc keybaord driver"
+	help
+	  Lirc keyboard driver.
+
+endchoice
+
+endif
+
+endif
+

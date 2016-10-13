@@ -1,0 +1,19 @@
+## SECTION=graphics_and_multimedia
+
+menuconfig IMX_TEST
+	bool
+	prompt "imx-test"
+	select IMX_LIB
+	help
+	  FIXME
+
+if IMX_TEST
+
+config IMX_TEST_PLATFORM
+	string
+	default "IMX53_VINCELL"
+	prompt "Platform type"
+	help
+	  This option is passed to the Makefile as PLATFORM variable.
+
+endif

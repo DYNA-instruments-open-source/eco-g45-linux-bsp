@@ -1,0 +1,23 @@
+--- a/drivers/input/keyboard/matrix_keypad.c
++++ b/drivers/input/keyboard/matrix_keypad.c
+@@ -464,6 +464,11 @@ matrix_keypad_parse_dt(struct device *de
+ }
+ #endif
+ 
++static void matrix_keypad_release(struct device *dev)
++{
++  // intentionally left empty
++}
++
+ static int matrix_keypad_probe(struct platform_device *pdev)
+ {
+ 	const struct matrix_keypad_platform_data *pdata;
+@@ -490,6 +495,8 @@ static int matrix_keypad_probe(struct pl
+ 		goto err_free_mem;
+ 	}
+ 
++	pdev->dev.release = matrix_keypad_release;
++
+ 	keypad->input_dev = input_dev;
+ 	keypad->pdata = pdata;
+ 	keypad->row_shift = get_count_order(pdata->num_col_gpios);

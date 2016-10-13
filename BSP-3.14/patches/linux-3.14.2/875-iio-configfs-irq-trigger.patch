@@ -1,0 +1,238 @@
+--- a/drivers/iio/trigger/Kconfig
++++ b/drivers/iio/trigger/Kconfig
+@@ -14,6 +14,17 @@ config IIO_INTERRUPT_TRIGGER
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called iio-trig-interrupt.
+ 
++config IIO_INTERRUPT_TRIGGER_CONFIGFS
++      tristate "ConfigFS interrupt trigger creator"
++      depends on IIO_INTERRUPT_TRIGGER
++      depends on CONFIGFS_FS
++      help
++    Provides support for creating platform IRQ ressources as
++    IIO triggers during runtime using the ConfigFS
++
++    To compile this driver as a module, choose M here: the
++    module will be called iio-trig-interrupt-configfs.
++
+ config IIO_SYSFS_TRIGGER
+ 	tristate "SYSFS trigger"
+ 	depends on SYSFS
+--- a/drivers/iio/trigger/Makefile
++++ b/drivers/iio/trigger/Makefile
+@@ -4,4 +4,5 @@
+ 
+ # When adding new entries keep the list in alphabetical order
+ obj-$(CONFIG_IIO_INTERRUPT_TRIGGER) += iio-trig-interrupt.o
++obj-$(CONFIG_IIO_INTERRUPT_TRIGGER_CONFIGFS) += iio-trig-interrupt-configfs.o
+ obj-$(CONFIG_IIO_SYSFS_TRIGGER) += iio-trig-sysfs.o
+--- /dev/null
++++ b/drivers/iio/trigger/iio-trig-interrupt-configfs.c
+@@ -0,0 +1,207 @@
++/*
++ * iio-trig-interrupt-configfs.c
++ *
++ *  Created on: 08.10.2014
++ *      Author: JOhannes Lode <linuxer@quantentunnel.de>
++ */
++
++#include <linux/module.h>
++#include <linux/version.h>
++#include <linux/kernel.h>
++
++#include <linux/platform_device.h>
++
++#include <linux/init.h>
++#include <linux/err.h>
++#include <linux/slab.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <linux/configfs.h>
++
++#define DRIVER_VERSION "0.1"
++
++struct iio_platform_irq_trigger
++{
++  struct resource irq_ressource[1];
++};
++
++struct platform_device *iio_platform_irq_trigger_create(unsigned int irq_num)
++{
++  struct platform_device* pdev;
++  struct iio_platform_irq_trigger trigger, *pdev_trigger;
++  int ret = 0;
++
++  memset(&trigger, 0, sizeof(trigger));
++  trigger.irq_ressource[0].start = irq_num;
++  trigger.irq_ressource[0].end = irq_num;
++  trigger.irq_ressource[0].flags = IORESOURCE_IRQ;
++
++  pdev = platform_device_alloc("iio_interrupt_trigger", PLATFORM_DEVID_AUTO);
++
++  if (!pdev)
++    return ERR_PTR(-ENOMEM);
++
++  ret = platform_device_add_data(pdev, &trigger, sizeof(trigger));
++
++  if (ret) {
++    platform_device_del(pdev);
++    return ERR_PTR(ret);
++  }
++
++  pdev_trigger = pdev->dev.platform_data;
++  pdev->resource = pdev_trigger->irq_ressource;
++  pdev->num_resources = ARRAY_SIZE(pdev_trigger->irq_ressource);
++
++  ret = platform_device_add(pdev);
++
++  if (ret) {
++    platform_device_del(pdev);
++    return ERR_PTR(ret);
++  }
++
++  return pdev;
++}
++EXPORT_SYMBOL(iio_platform_irq_trigger_create);
++
++int iio_platform_irq_trigger_destroy(struct platform_device *p)
++{
++  platform_device_unregister(p);
++
++  return 0;
++}
++EXPORT_SYMBOL(iio_platform_irq_trigger_destroy);
++
++struct iio_platform_irq_trigger_target {
++  struct config_item item;
++  struct platform_device *pdev;
++};
++
++static struct config_item_type iio_platform_irq_trigger_item_type = {
++  .ct_owner = THIS_MODULE,
++};
++
++static struct config_item *make_iio_platform_irq_trigger_target(struct config_group *group,
++            const char *name)
++{
++  struct iio_platform_irq_trigger_target *t;
++  unsigned long irq_num;
++  int ret;
++
++  ret = strict_strtoul(name, 10, &irq_num);
++  if (ret) {
++    ret = -EINVAL;
++    goto err_invalid_gpio;
++  }
++
++  t = kzalloc(sizeof(*t), GFP_KERNEL);
++  if (!t)
++    return ERR_PTR(-ENOMEM);
++
++  t->pdev = iio_platform_irq_trigger_create(irq_num);
++  if (IS_ERR_OR_NULL(t->pdev))
++    goto err_iio_platform_irq_trigger_create;
++
++  config_item_init_type_name(&t->item, name, &iio_platform_irq_trigger_item_type);
++
++  return &t->item;
++
++err_iio_platform_irq_trigger_create:
++  kfree(t);
++err_invalid_gpio:
++  return ERR_PTR(ret);
++}
++
++static void drop_iio_platform_irq_trigger_target(struct config_group *group,
++         struct config_item *item)
++{
++  struct iio_platform_irq_trigger_target *t;
++
++  t = container_of(item, struct iio_platform_irq_trigger_target, item);
++
++  iio_platform_irq_trigger_destroy(t->pdev);
++  config_item_put(&t->item);
++  kfree(t);
++}
++
++static const char iio_platform_irq_trigger_subsys_readme_text[] =
++    "To create a IRQ trigger make here a directory named with the\n"
++    "number of the IRQ number. \n"
++    "\n"
++    "To destroy your IRQ trigger, first release all references to\n"
++    "it and then remove the directory here.\n";
++
++static struct configfs_attribute iio_platform_irq_trigger_subsys_readme_attribute = {
++    .ca_name = "description",
++    .ca_owner = THIS_MODULE,
++    .ca_mode  = S_IRUGO,
++};
++
++static struct configfs_attribute *iio_platform_irq_trigger_subsys_attr_list[] = {
++    &iio_platform_irq_trigger_subsys_readme_attribute,
++    0, /* sentinel */
++};
++
++static ssize_t iio_platform_irq_trigger_show_readme(struct config_item *item,
++    struct configfs_attribute *attr,
++    char *buffer)
++{
++  ssize_t ret = -ENOENT;
++
++  if (&iio_platform_irq_trigger_subsys_readme_attribute == attr)
++  {
++    strcpy(buffer, iio_platform_irq_trigger_subsys_readme_text);
++    ret = strlen(iio_platform_irq_trigger_subsys_readme_text);
++  }
++
++  return ret;
++}
++
++static struct configfs_item_operations iio_platform_irq_trigger_subsys_item_ops = {
++  .show_attribute = &iio_platform_irq_trigger_show_readme,
++};
++
++static struct configfs_group_operations iio_platform_irq_trigger_subsys_group_ops = {
++  .make_item = make_iio_platform_irq_trigger_target,
++  .drop_item = drop_iio_platform_irq_trigger_target,
++};
++
++static struct config_item_type iio_platform_irq_trigger_subsys_type = {
++  .ct_group_ops = &iio_platform_irq_trigger_subsys_group_ops,
++  .ct_item_ops  = &iio_platform_irq_trigger_subsys_item_ops,
++  .ct_owner = THIS_MODULE,
++  .ct_attrs = iio_platform_irq_trigger_subsys_attr_list,
++};
++
++static struct configfs_subsystem iio_platform_irq_trigger_subsys = {
++  .su_group = {
++    .cg_item = {
++      .ci_name = "iio_trigger_irq",
++      .ci_type = &iio_platform_irq_trigger_subsys_type,
++    },
++  },
++};
++
++
++static int __init iio_platform_irq_trigger_init(void)
++{
++  int ret = 0;
++
++  config_group_init(&iio_platform_irq_trigger_subsys.su_group);
++  mutex_init(&iio_platform_irq_trigger_subsys.su_mutex);
++  ret = configfs_register_subsystem(&iio_platform_irq_trigger_subsys);
++
++  return ret;
++}
++module_init(iio_platform_irq_trigger_init);
++
++static void __exit iio_platform_irq_trigger_exit(void)
++{
++  configfs_unregister_subsystem(&iio_platform_irq_trigger_subsys);
++}
++module_exit(iio_platform_irq_trigger_exit);
++
++MODULE_AUTHOR("Johannes Lode <linuxer@quantentunnel.de>");
++MODULE_DESCRIPTION("IIO IRQ trigger platform device creator");
++MODULE_VERSION(DRIVER_VERSION);
++MODULE_LICENSE("GPL v2");
++

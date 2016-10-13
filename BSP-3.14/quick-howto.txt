@@ -1,0 +1,6 @@
+cd ~/ptxdist/build/BSP-3.14
+ptxdist menuconfig
+ptxdist kernelconfig
+ptxdist go (optional)
+ptxdist images
+rsync -rcP ../../DYNA-ECO-G45_BSP_linux-3.14/platform-ECO-G45-2014.04.0/images/ ~/tftp-export/DYNA-Linux-3.14/

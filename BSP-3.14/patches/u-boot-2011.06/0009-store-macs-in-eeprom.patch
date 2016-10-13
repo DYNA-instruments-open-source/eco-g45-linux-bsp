@@ -1,0 +1,57 @@
+Index: u-boot-2011.06/common/cmd_nvedit.c
+===================================================================
+--- u-boot-2011.06.orig/common/cmd_nvedit.c
++++ u-boot-2011.06/common/cmd_nvedit.c
+@@ -53,6 +53,9 @@
+ #if defined(CONFIG_CMD_NET)
+ #include <net.h>
+ #endif
++#if defined(CONFIG_MAC_IS_IN_EEPROM)
++#include <i2c.h>
++#endif
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -546,9 +549,42 @@ int getenv_f(const char *name, char *buf
+ int do_env_save(cmd_tbl_t *cmdtp, int flag, int argc, char * const argv[])
+ {
+ 	extern char *env_name_spec;
++#if defined(CONFIG_MAC_IS_IN_EEPROM)
++	uchar eeprom_mac[6];
++	uchar env_mac[6];
++#endif
+ 
+ 	printf("Saving Environment to %s...\n", env_name_spec);
+ 
++#if defined(CONFIG_MAC_IS_IN_EEPROM)
++	i2c_init(CONFIG_SYS_I2C_SPEED, CONFIG_SYS_I2C_SLAVE);
++
++	/* If ethaddr is valid, check if it is equal to that in EEPROM. */
++	if(eth_getenv_enetaddr("ethaddr", env_mac)) {
++		i2c_read(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETHADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, eeprom_mac, 6);
++		if (memcmp(env_mac, eeprom_mac, 6)) {
++			/* Update ethaddr in EEPROM if it is not equal to the current ethaddr value. */
++			i2c_write(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETHADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, env_mac, 6);
++		}
++	}
++	/* If eth1addr is valid, check if it is equal to that in EEPROM. */
++	if(eth_getenv_enetaddr("eth1addr", env_mac)) {
++		i2c_read(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETH1ADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, eeprom_mac, 6);
++		if (memcmp(env_mac, eeprom_mac, 6)) {
++			/* Update eth1addr in EEPROM if it is not equal to the current eth1addr value. */
++			i2c_write(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETH1ADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, env_mac, 6);
++		}
++	}
++	/* If eth2addr is valid, check if it is equal to that in EEPROM. */
++	if(eth_getenv_enetaddr("eth2addr", env_mac)) {
++		i2c_read(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETH2ADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, eeprom_mac, 6);
++		if (memcmp(env_mac, eeprom_mac, 6)) {
++			/* Update eth2addr in EEPROM if it is not equal to the current eth2addr value. */
++			i2c_write(CONFIG_SYS_I2C_EEPROM_ADDR, CONFIG_ETH2ADDR_EEPROM_OFFSET, CONFIG_SYS_I2C_EEPROM_ADDR_LEN, env_mac, 6);
++		}
++	}
++#endif
++
+ 	return saveenv() ? 1 : 0;
+ }
+ 

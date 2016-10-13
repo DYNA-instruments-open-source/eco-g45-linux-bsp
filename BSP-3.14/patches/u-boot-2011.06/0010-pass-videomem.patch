@@ -1,0 +1,122 @@
+Index: u-boot-2011.06/arch/arm/lib/bootm.c
+===================================================================
+--- u-boot-2011.06.orig/arch/arm/lib/bootm.c
++++ u-boot-2011.06/arch/arm/lib/bootm.c
+@@ -29,6 +29,7 @@
+ #include <fdt.h>
+ #include <libfdt.h>
+ #include <fdt_support.h>
++#include <lcd.h>
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -40,7 +41,7 @@ DECLARE_GLOBAL_DATA_PTR;
+ static void setup_start_tag (bd_t *bd);
+ 
+ # ifdef CONFIG_SETUP_MEMORY_TAGS
+-static void setup_memory_tags (bd_t *bd);
++static void setup_memory_tags (bd_t *bd, ulong videosize);
+ # endif
+ static void setup_commandline_tag (bd_t *bd, char *commandline);
+ 
+@@ -102,6 +103,32 @@ int do_bootm_linux(int flag, int argc, c
+ 
+ #ifdef CONFIG_CMDLINE_TAG
+ 	char *commandline = getenv ("bootargs");
++	ulong videosize = 0;
++
++#ifdef CONFIG_LCD
++	char videomem_arg[32];
++
++	if(lcd_is_enabled) {
++	/* Add the videomem automatically to the command line */
++	s = getenv("videosize");
++		if (s) {
++			videosize = simple_strtoul (s, NULL, 16);
++			printf("Video memory size 0x%08lx from environment\n", videosize);
++		}
++		/* Minimum video size is 4 * xres * yres * 32 bpp.
++		Maximum video size is SRAM / 2. */
++		if((videosize < (panel_info.vl_col * panel_info.vl_row * 4 * 4))
++			|| (videosize > (unsigned int)(CONFIG_SYS_SDRAM_SIZE / 2))) {
++			videosize = panel_info.vl_col * panel_info.vl_row * 4 * 4;
++		}
++		sprintf(videomem_arg, " vidmem=%1d,0x%08lx,0x%08lx", (unsigned int)1,
++				gd->fb_base, videosize);
++	} else {
++		sprintf(videomem_arg, " vidmem=%1d,0x%08lx,0x%08lx", (unsigned int)0,
++			(ulong)0xFFFFFFFF, (ulong)0xFFFFFFFF);
++	}
++	strcat(commandline, videomem_arg);
++#endif
+ #endif
+ 
+ 	if ((flag != 0) && (flag != BOOTM_STATE_OS_GO))
+@@ -138,7 +165,7 @@ int do_bootm_linux(int flag, int argc, c
+ 	setup_revision_tag (&params);
+ #endif
+ #ifdef CONFIG_SETUP_MEMORY_TAGS
+-	setup_memory_tags (bd);
++	setup_memory_tags (bd, videosize);
+ #endif
+ #ifdef CONFIG_CMDLINE_TAG
+ 	setup_commandline_tag (bd, commandline);
+@@ -238,18 +265,53 @@ static void setup_start_tag (bd_t *bd)
+ 
+ 
+ #ifdef CONFIG_SETUP_MEMORY_TAGS
+-static void setup_memory_tags (bd_t *bd)
++static void setup_memory_tags (bd_t *bd, ulong videosize)
+ {
+ 	int i;
++	ulong tmp = 0;
+ 
++	/* Linux only seems to cope with 1MB memory chunks. Round up. */
++	tmp = videosize >> 20;
++	tmp++;
++	videosize = tmp << 20;
+ 	for (i = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
+ 		params->hdr.tag = ATAG_MEM;
+ 		params->hdr.size = tag_size (tag_mem32);
+ 
+-		params->u.mem.start = bd->bi_dram[i].start;
+-		params->u.mem.size = bd->bi_dram[i].size;
+-
+-		params = tag_next (params);
++		/* Video memory fits in the DRAM bank.. */
++		if((gd->fb_base >= bd->bi_dram[i].start) &&
++			(gd->fb_base + videosize
++			<= bd->bi_dram[i].start + bd->bi_dram[i].size) && videosize != 0) {
++			/* Video memory starts exactly at the beginning of the bank. */
++			if(gd->fb_base == bd->bi_dram[i].start) {
++				params->u.mem.start = bd->bi_dram[i].start + videosize;
++				params->u.mem.size = bd->bi_dram[i].size - videosize;
++				params = tag_next (params);
++			/* Video memory ends exactly at the end of the bank. */
++			} else if(gd->fb_base + videosize ==
++						bd->bi_dram[i].start + bd->bi_dram[i].size) {
++				params->u.mem.start = bd->bi_dram[i].start;
++				params->u.mem.size = bd->bi_dram[i].size - videosize;
++				params = tag_next (params);
++			/* Video memory resides midway through the bank.*/
++			} else {
++				/* First split. */
++				params->u.mem.start = bd->bi_dram[i].start;
++				params->u.mem.size = gd->fb_base - bd->bi_dram[i].start;
++				params = tag_next (params);
++				/* Second split. */
++				params->hdr.tag = ATAG_MEM;
++				params->hdr.size = tag_size (tag_mem32);
++				params->u.mem.start = gd->fb_base + videosize;
++				params->u.mem.size = bd->bi_dram[i].start + bd->bi_dram[i].size
++									- (gd->fb_base + videosize);
++				params = tag_next (params);
++			}
++		} else {
++			params->u.mem.start = bd->bi_dram[i].start;
++			params->u.mem.size = bd->bi_dram[i].size;
++			params = tag_next (params);
++		}
+ 	}
+ }
+ #endif /* CONFIG_SETUP_MEMORY_TAGS */

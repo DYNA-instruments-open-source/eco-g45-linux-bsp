@@ -1,0 +1,61 @@
+Index: linux-2.6.33/arch/arm/plat-mxc/pwm.c
+===================================================================
+--- linux-2.6.33.orig/arch/arm/plat-mxc/pwm.c
++++ linux-2.6.33/arch/arm/plat-mxc/pwm.c
+@@ -55,6 +55,41 @@ struct pwm_device {
+ 	unsigned int	pwm_id;
+ };
+ 
++int pwm_config_raw(struct pwm_device *pwm, int duty_cycles, int period_cycles)
++{
++	if (pwm == NULL || period_cycles == 0 || duty_cycles > period_cycles + 2)
++		return -EINVAL;
++
++	if (cpu_is_mx27() || cpu_is_mx3() || cpu_is_mx25()) {
++		u32 cr;
++
++		writel(duty_cycles, pwm->mmio_base + MX3_PWMSAR);
++		writel(period_cycles, pwm->mmio_base + MX3_PWMPR);
++
++		cr = readl(pwm->mmio_base + MX3_PWMCR);
++		cr |= MX3_PWMCR_STOPEN | MX3_PWMCR_DOZEEN |
++		      MX3_PWMCR_WAITEN | MX3_PWMCR_DBGEN;
++		
++		cr &= ~MX3_PWMCR_CLKSRC_IPG_32k;
++
++		if (cpu_is_mx25())
++		{
++			cr |= MX3_PWMCR_CLKSRC_IPG;
++			cr &= ~0xFFF0; // set prescaler to 1
++		}
++		else
++			cr |= MX3_PWMCR_CLKSRC_IPG_HIGH;
++
++		writel(cr, pwm->mmio_base + MX3_PWMCR);
++	} else {
++		BUG();
++	}
++
++	return 0;
++}
++
++EXPORT_SYMBOL(pwm_config_raw);
++
+ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ {
+ 	if (pwm == NULL || period_ns == 0 || duty_ns > period_ns)
+Index: linux-2.6.33/include/linux/pwm.h
+===================================================================
+--- linux-2.6.33.orig/include/linux/pwm.h
++++ linux-2.6.33/include/linux/pwm.h
+@@ -19,6 +19,10 @@ void pwm_free(struct pwm_device *pwm);
+ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns);
+ 
+ /*
++ * pwm_config - change a raw PWM device configuration
++ */
++int pwm_config_raw(struct pwm_device *pwm, int duty_cycles, int period_cycles);
++/*
+  * pwm_enable - start a PWM output toggling
+  */
+ int pwm_enable(struct pwm_device *pwm);

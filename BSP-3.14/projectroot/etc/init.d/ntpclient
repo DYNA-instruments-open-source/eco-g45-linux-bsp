@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# ntpclient
+#
+case $1 in
+
+	start)
+		echo "ntpclient starting"
+		/usr/sbin/ntpclient -s -i 600 -l -h ntp.ubuntu.com > /dev/null &
+		;;
+
+esac
+

@@ -1,0 +1,17 @@
+# DESCRIPTION: Garz & Fricke fwrite endurance test
+# --------------------------------------------------------------------------
+# This test sequence writes files from 100 Bytes to 10 MBytes (10x each),
+# 100 MBytes (4x), 1 GBytes (1x) and 2 GBytes (1x) on a USB drive. This is
+# approx. 3.5 GBytes in total. You can copy and paste the following lines
+# a few times to run them more than once.
+# The USB drive has to be mounted in /mnt/mstick.
+# --------------------------------------------------------------------------
+fwrite_100            fwrite -n /mnt/mstick/file100 -b 100 -i 10
+fwrite_1k             fwrite -n /mnt/mstick/file1k -b 1024 -i 10
+fwrite_10k            fwrite -n /mnt/mstick/file10k -b 10240 -i 10
+fwrite_100k           fwrite -n /mnt/mstick/file100k -b 102400 -i 10
+fwrite_1M             fwrite -n /mnt/mstick/file1M -b 1048576 -i 10
+fwrite_10M            fwrite -n /mnt/mstick/file10M -b 10485760 -i 10
+fwrite_100M           fwrite -n /mnt/mstick/file100M -b 104857600 -i 4
+fwrite_1G             fwrite -n /mnt/mstick/file1G -b 1073741824 -i 1
+fwrite_2G             fwrite -n /mnt/mstick/file2G -b 2147483647 -i 1

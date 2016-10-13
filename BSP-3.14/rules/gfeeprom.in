@@ -1,0 +1,8 @@
+## SECTION=fixme
+
+config GFEEPROM
+	bool
+	select KERNEL_HEADER
+	prompt "gfeeprom console tool"
+	help
+	  FIXME

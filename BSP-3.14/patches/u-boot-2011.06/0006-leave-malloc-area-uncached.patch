@@ -1,0 +1,20 @@
+Index: u-boot-2011.06/arch/arm/lib/cache-cp15.c
+===================================================================
+--- u-boot-2011.06.orig/arch/arm/lib/cache-cp15.c
++++ u-boot-2011.06/arch/arm/lib/cache-cp15.c
+@@ -58,8 +58,14 @@ static inline void dram_bank_mmu_setup(i
+ 
+ 	debug("%s: bank: %d\n", __func__, bank);
+ 	for (i = bd->bi_dram[bank].start >> 20;
+-	     i < (bd->bi_dram[bank].start + bd->bi_dram[bank].size) >> 20;
++	     i < (gd->relocaddr - TOTAL_MALLOC_LEN) >> 20;
+ 	     i++) {
++		/* Leave the memory beginning the malloc area uncached. This is currently necessary because dma_alloc_coherent(...)
++		   is implemented a normal malloc operation. Malloc leaves the requested memory cached. Drivers
++		   that allocate DMA memory with dma_alloc_coherent(...) expects the requested memory to be uncached
++		   and fail on DMA operations (e.g. macb ethernet driver). The current drawback is that all dynamically
++		   requested memory is now uncached too, because there is no destinction betwaeen DMA coherent and
++		   normal memory. */
+ 		page_table[i] = i << 20 | (3 << 10) | CACHE_SETUP;
+ 	}
+ }
