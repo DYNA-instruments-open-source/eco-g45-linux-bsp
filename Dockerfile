@@ -11,4 +11,4 @@ ADD DYNA-ECO-G45_BSP_linux-3.14.tar /home/ptxdist/
 WORKDIR /home/ptxdist/BSP-3.14
 USER ptxdist
 VOLUME /tftpboot
-CMD [ "/bin/bash" "-il" ]
+CMD ["/bin/bash", "-il"]
