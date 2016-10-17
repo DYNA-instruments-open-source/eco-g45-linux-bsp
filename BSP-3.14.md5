@@ -1451,6 +1451,7 @@ b70723be905d02a43f571cd0f5b7bcb4  BSP-3.14/projectroot/etc/asound.state.CUPID-AN
 834077a25e5dd4765bdb690e99ddc7a0  BSP-3.14/projectroot/etc/asound.state.NESO
 c1274508e62cbdba0a65b8ac1fe07f37  BSP-3.14/projectroot/etc/asound.state.NESO-LT
 baa1496c638e2c2685f5a5e1a894395f  BSP-3.14/projectroot/etc/asound.state.VINCELL
+31322a0442fac3b5ffc0023d419b59c1  BSP-3.14/projectroot/etc/fw_env.config.ECO-G45
 41cfe43fd80a4f10ce33fb1545c559e3  BSP-3.14/projectroot/etc/group
 39bbd2f51b59924e7b53d7a5f13a5884  BSP-3.14/projectroot/etc/init.d/camera
 d694f2e5d0dda4819ab62eab2fdf4e83  BSP-3.14/projectroot/etc/init.d/classpath-awt-demo
