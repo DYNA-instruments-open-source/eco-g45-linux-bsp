@@ -1,0 +1,102 @@
+Index: linux-3.14.2/drivers/mtd/nand/nand_base.c
+===================================================================
+--- linux-3.14.2.orig/drivers/mtd/nand/nand_base.c
++++ linux-3.14.2/drivers/mtd/nand/nand_base.c
+@@ -1065,6 +1065,37 @@ static int nand_read_page_raw(struct mtd
+ }
+ 
+ /**
++ * nand_read_page_raw_macronix - [INTERN] read raw page data on Macronix ECC-free flash
++ * @mtd: mtd info structure
++ * @chip: nand chip info structure
++ * @buf: buffer to store read data
++ * @oob_required: caller requires OOB data read to chip->oob_poi
++ * @page: page number to read
++ *
++ * Not for syndrome calculating ecc controllers, which use a special oob layout
++ */
++static int nand_read_page_raw_macronix(struct mtd_info *mtd, struct nand_chip *chip,
++			      uint8_t *buf, int oob_required, int page)
++{
++	chip->read_buf(mtd, buf, mtd->writesize);
++	if (oob_required)
++		chip->read_buf(mtd, chip->oob_poi, mtd->oobsize);
++
++	chip->cmdfunc(mtd, NAND_CMD_STATUS, -1, -1);
++	switch (chip->read_byte(mtd) & 0x19)
++	{
++		case 0x00 : break;	// 0 or 1 corrected errors / chip won't tell difference)
++		case 0x10 : mtd->ecc_stats.corrected += 2; break;
++		case 0x08 : mtd->ecc_stats.corrected += 3; break;
++		case 0x18 : mtd->ecc_stats.corrected += 4; break;
++		default:
++			mtd->ecc_stats.failed++;
++	}
++	return 0;
++}
++
++
++/**
+  * nand_read_page_raw_syndrome - [INTERN] read raw page data without ecc
+  * @mtd: mtd info structure
+  * @chip: nand chip info structure
+@@ -3569,6 +3600,9 @@ ident_done:
+ 			break;
+ 	}
+ 
++	if ((*maf_id == NAND_MFR_MACRONIX) && (id_data[4] & 0x80))
++		chip->options |= NAND_MACRONIX_INTERNAL_ECC;
++
+ 	if (chip->options & NAND_BUSWIDTH_AUTO) {
+ 		WARN_ON(chip->options & NAND_BUSWIDTH_16);
+ 		chip->options |= busw;
+@@ -3741,6 +3775,9 @@ int nand_scan_tail(struct mtd_info *mtd)
+ 	 * selected and we have 256 byte pagesize fallback to software ECC
+ 	 */
+ 
++	if (chip->options & NAND_MACRONIX_INTERNAL_ECC)
++		ecc->mode = NAND_ECC_HW_MACRONIX;
++
+ 	switch (ecc->mode) {
+ 	case NAND_ECC_HW_OOB_FIRST:
+ 		/* Similar to NAND_ECC_HW, but a separate read_page handle */
+@@ -3856,6 +3893,17 @@ int nand_scan_tail(struct mtd_info *mtd)
+ 		ecc->strength = ecc->bytes * 8 / fls(8 * ecc->size);
+ 		break;
+ 
++	case NAND_ECC_HW_MACRONIX:
++		ecc->read_page = nand_read_page_raw_macronix;
++		ecc->write_page = nand_write_page_raw;
++		ecc->read_oob = nand_read_oob_std;
++		ecc->read_page_raw = nand_read_page_raw_macronix;
++		ecc->write_page_raw = nand_write_page_raw;
++		ecc->write_oob = nand_write_oob_std;
++		ecc->size = 512;
++		ecc->bytes = 0;
++		break;
++
+ 	case NAND_ECC_NONE:
+ 		pr_warn("NAND_ECC_NONE selected by board driver. "
+ 			   "This is not recommended!\n");
+Index: linux-3.14.2/include/linux/mtd/nand.h
+===================================================================
+--- linux-3.14.2.orig/include/linux/mtd/nand.h
++++ linux-3.14.2/include/linux/mtd/nand.h
+@@ -123,6 +123,7 @@ typedef enum {
+ 	NAND_ECC_HW_SYNDROME,
+ 	NAND_ECC_HW_OOB_FIRST,
+ 	NAND_ECC_SOFT_BCH,
++	NAND_ECC_HW_MACRONIX,
+ } nand_ecc_modes_t;
+ 
+ /*
+@@ -166,6 +167,9 @@ typedef enum {
+ /* Device supports subpage reads */
+ #define NAND_SUBPAGE_READ	0x00001000
+ 
++/* Chip is Macronix ECC-free flash and calculates ECC itself */
++#define NAND_MACRONIX_INTERNAL_ECC     0x00002000
++
+ /* Options valid for Samsung large page devices */
+ #define NAND_SAMSUNG_LP_OPTIONS NAND_CACHEPRG
+ 

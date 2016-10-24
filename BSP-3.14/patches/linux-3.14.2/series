@@ -25,3 +25,4 @@
 810-matrix-keypad-unload-fix.patch
 930-dynacon2-3x3keypad.patch
 999-sja1000_platform-debug-output.patch
+410-macronix-ecc-free-nand.patch

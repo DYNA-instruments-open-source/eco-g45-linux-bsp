@@ -45,11 +45,11 @@ a4a7e457b55b5ac2877f7973dbba37e9  BSP-3.14/local_src/common/evtest/.git/hooks/pr
 81005745454846bb79cc3c7c0c57658d  BSP-3.14/local_src/common/evtest/.git/hooks/pre-rebase.sample
 7dfe15854212a30f346da5255c1d794b  BSP-3.14/local_src/common/evtest/.git/hooks/prepare-commit-msg.sample
 f51b02427757e79621b5235d7efdf117  BSP-3.14/local_src/common/evtest/.git/hooks/update.sample
-1604653efa9c07d0acbecde0e52d83f0  BSP-3.14/local_src/common/evtest/.git/index
+a29527dd07d2565ae846e9c0d603accc  BSP-3.14/local_src/common/evtest/.git/index
 036208b4a1ab4a235d75c181e685e5a3  BSP-3.14/local_src/common/evtest/.git/info/exclude
-c617c76e2d89cc7ae13fc5d0f83e425c  BSP-3.14/local_src/common/evtest/.git/logs/HEAD
-134b12008135d1b6b5e4e7c5efd67ea9  BSP-3.14/local_src/common/evtest/.git/logs/refs/heads/master
-c1664f988051ce563ec5173dc0d9d6c3  BSP-3.14/local_src/common/evtest/.git/logs/refs/remotes/origin/HEAD
+207cf7dcb2518d04af797f207d5bf36b  BSP-3.14/local_src/common/evtest/.git/logs/HEAD
+207cf7dcb2518d04af797f207d5bf36b  BSP-3.14/local_src/common/evtest/.git/logs/refs/heads/master
+207cf7dcb2518d04af797f207d5bf36b  BSP-3.14/local_src/common/evtest/.git/logs/refs/remotes/origin/HEAD
 ac106854c9f950dea23e224f6bcb8e9e  BSP-3.14/local_src/common/evtest/.git/logs/refs/remotes/origin/master
 9bb49659d865e47536a7ea9f40e39cd0  BSP-3.14/local_src/common/evtest/.git/objects/00/77899bc6da90367b82f4f7533d0d277270f746
 9a389b08b38f4f1c4f21c201592f1930  BSP-3.14/local_src/common/evtest/.git/objects/00/c544cded7e34fc219791e27f947d41e4e62e85
@@ -85,7 +85,9 @@ c6eaac4eefbf86e6201768064bd7b350  BSP-3.14/local_src/common/evtest/.git/objects/
 4dbcbae986e564fee3998ce6d8d99c95  BSP-3.14/local_src/common/evtest/.git/objects/fa/d884283414eba3d919d9cb8bba46f05288f4ed
 751ad1c17da1a52f86e453ebddc6e141  BSP-3.14/local_src/common/evtest/.git/objects/pack/pack-55a4b66dde370e0101faa8bee48cc0ee0e0d03a9.idx
 2fafb0c46c423f35a83ce67f0e47df57  BSP-3.14/local_src/common/evtest/.git/objects/pack/pack-55a4b66dde370e0101faa8bee48cc0ee0e0d03a9.pack
-6b1fbb1920928db9ed464aa4cbe75552  BSP-3.14/local_src/common/evtest/.git/packed-refs
+3e5ed37b4bd7a2f697187b4b1b4edbaf  BSP-3.14/local_src/common/evtest/.git/objects/pack/pack-aaf17d99dc9056f62d44e6d2ac17280d75b2fd93.idx
+607b78fd4eb98761692bad8757511dac  BSP-3.14/local_src/common/evtest/.git/objects/pack/pack-aaf17d99dc9056f62d44e6d2ac17280d75b2fd93.pack
+c353a97da383b0cfe9054cf2c2c98601  BSP-3.14/local_src/common/evtest/.git/packed-refs
 92758a9d972814f107e5f3b199372384  BSP-3.14/local_src/common/evtest/.git/refs/heads/master
 73a00957034783b7b5c8294c54cd3e12  BSP-3.14/local_src/common/evtest/.git/refs/remotes/origin/HEAD
 92758a9d972814f107e5f3b199372384  BSP-3.14/local_src/common/evtest/.git/refs/remotes/origin/master
@@ -1159,7 +1161,8 @@ e984bb856d998d1a5629111da4d3199a  BSP-3.14/patches/Bootstrap-v1.16/0005-fix-link
 29cab17a4138ed0f0edbfbfcc006ae25  BSP-3.14/patches/Bootstrap-v1.16/1000-add-eco-g45-board.patch
 2f2c2682e1b1de6d1ca1bfcf284c9828  BSP-3.14/patches/Bootstrap-v1.16/1001-add-lauterbach-nand-algorthms.patch
 f9cca2f1ff92cf3bcc798dba235e1d66  BSP-3.14/patches/Bootstrap-v1.16/1002-add-lauterbach-nand-update-script.patch
-8dfa9094ddd9dd5fb39045fd5d7f7184  BSP-3.14/patches/Bootstrap-v1.16/series
+1a85d15d426bc4a8c7652cc320736048  BSP-3.14/patches/Bootstrap-v1.16/1004-add-eco-g45-macronix-nand.patch
+61435483c10b5b23a8183474a7b51e05  BSP-3.14/patches/Bootstrap-v1.16/series
 6094fab4e2ad65f723133abf17b26443  BSP-3.14/patches/autogen.sh
 e1fada348634406fe932ba5df63d12c7  BSP-3.14/patches/classpath-0.98/classpath-0.98-add-qt-qws-support.patch
 8d680806e9c33ab4891c2d14e448717c  BSP-3.14/patches/classpath-0.98/classpath-0.98-cross-compile-qt.patch
@@ -1322,6 +1325,7 @@ e02340be9f5c672a69cc548115fc36ea  BSP-3.14/patches/linux-2.6.39/0019-extend-atme
 618af25343dfe4ac0bc9bdbcca50495d  BSP-3.14/patches/linux-3.14.2/370-board-at91sam9g45-configfs.patch
 d39a1a20c23391b3e7c93c506a851380  BSP-3.14/patches/linux-3.14.2/380-add-ecoG45-board.patch
 f2069cc4b72d428f476f4bd9c7eaa844  BSP-3.14/patches/linux-3.14.2/381-add-ecoG45-eval-board.patch
+0ca406cee827738a6236a3239274f60f  BSP-3.14/patches/linux-3.14.2/410-macronix-ecc-free-nand.patch
 295f3c08f142bf0bebaba833044d2fb9  BSP-3.14/patches/linux-3.14.2/810-matrix-keypad-unload-fix.patch
 e4def5d0ca9b380f1aea125456f758d0  BSP-3.14/patches/linux-3.14.2/820-usb_add_usb_find_device_by_name.patch
 037d69e047894fbda87d178dc9ee30e7  BSP-3.14/patches/linux-3.14.2/830-ledtrig_morse.patch
@@ -1345,7 +1349,7 @@ add4242f82794087cd93475f90664113  BSP-3.14/patches/linux-3.14.2/910-can-oki-ml96
 70f6c96a6359230cb75258a5e8ecdb85  BSP-3.14/patches/linux-3.14.2/930-dynacon2-3x3keypad.patch
 91bd002df4339f4b959fe2c1340e11e9  BSP-3.14/patches/linux-3.14.2/999-sja1000_platform-debug-output.patch
 737e35394ffa1f153810a6e599266fc5  BSP-3.14/patches/linux-3.14.2/PATCHES
-b837ec8df48696ee71d818a985539835  BSP-3.14/patches/linux-3.14.2/series
+c472799cabcb155357553a79a3022ef3  BSP-3.14/patches/linux-3.14.2/series
 242fbf036370827ed71311bd5b185200  BSP-3.14/patches/ltp-full-20100430/add-testcases-option.patch
 217710a5b39e2df3f235d8940b75e501  BSP-3.14/patches/ltp-full-20100430/series
 242fbf036370827ed71311bd5b185200  BSP-3.14/patches/ltp-full-20110915/add-testcases-option.patch
@@ -1433,7 +1437,8 @@ e86350abc83b653614a9df3f6eca1888  BSP-3.14/patches/u-boot-2011.06/0010-pass-vide
 8accd877ca4dd60ce6d4012cd537d707  BSP-3.14/patches/u-boot-2011.06/1000-add-eco-g45-board.patch
 41c5ad1d265997d5dcaf28f26c7b4d83  BSP-3.14/patches/u-boot-2011.06/1001-add-lauterbach-nand-algorthms.patch
 f9fd7fc6f36b88bf078c8458166b164e  BSP-3.14/patches/u-boot-2011.06/1002-add-lauterbach-nand-update-script.patch
-8acd2076c2fa3f69eb41352168704b7c  BSP-3.14/patches/u-boot-2011.06/series
+98a2b30816048f8377317ba8fcc15e07  BSP-3.14/patches/u-boot-2011.06/1003-add-eco-g45-macronix-nand.patch
+83233d311712f00ccfd0a707789eeffe  BSP-3.14/patches/u-boot-2011.06/series
 6094fab4e2ad65f723133abf17b26443  BSP-3.14/patches/udev-150/autogen.sh
 5ff60430132e0d71db8567886ab046bb  BSP-3.14/patches/udev-150/series
 f9119b5aca6931c7e4c13585fbc71b2c  BSP-3.14/patches/udev-150/udev-150-fix-ppc-build.diff
