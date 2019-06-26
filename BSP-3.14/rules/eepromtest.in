@@ -1,7 +1,0 @@
-## SECTION=test_suites
-
-config EEPROMTEST
-	tristate
-	prompt "eepromtest"
-	help
-	  FIXME

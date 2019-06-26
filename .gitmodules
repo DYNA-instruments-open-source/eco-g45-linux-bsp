@@ -1,4 +1,4 @@
 [submodule "evtest"]
-      path = BSP-3.14/local_src/common/evtest
+	path = DYNA-BSP/local_src/common/evtest
       url = http://anongit.freedesktop.org/git/evtest
 

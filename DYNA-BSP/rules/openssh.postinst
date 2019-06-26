@@ -1,0 +1,8 @@
+#!/bin/sh
+test -f $DESTDIR/sbin/sshd && test -f $DESTDIR/etc/rc.once.d/openssh && {
+  $DESTDIR/sbin/enable-rc-once openssh
+  exit $?
+}
+
+true
+

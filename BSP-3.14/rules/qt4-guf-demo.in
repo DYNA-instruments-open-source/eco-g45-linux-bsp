@@ -1,8 +1,0 @@
-## SECTION=fixme
-
-config QT4_GUF_DEMO
-bool
-select QT4
-prompt "Garz & Fricke demo application"
-help
-  Garz & Fricke demo application.

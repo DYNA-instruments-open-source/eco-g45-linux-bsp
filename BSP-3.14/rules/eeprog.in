@@ -1,7 +1,0 @@
-## SECTION=shell_and_console
-
-config EEPROG
-	tristate
-	prompt "eeprog"
-	help
-	  FIXME

@@ -1,0 +1,457 @@
+/*
+ * at91sam9g45-eco-g45-dynacon.dts - Device Tree file for AT91SAM9G45 ECO-G45 on DYNAconII
+ *
+ *  Copyright (C) 2017 DYNA Instruments GmbH,
+ *                2017 Johannes Lode <linuxer@quantentunnel.de>
+ *
+ * Licensed under GPLv2 or later.
+ */
+/dts-v1/;
+#include "at91sam9g45.dtsi"
+#include <dt-bindings/pwm/pwm.h>
+
+/ {
+	model = "DYNA Instruments DYNAcon-II";
+	compatible = "dyna,dyncacon", "guf,eco-g45", "atmel,at91sam9g45", "atmel,at91sam9";
+
+	chosen {
+		bootargs = "console=ttyS0,115200 earlyprintk ubi.mtd=root root=ubi0:root rootfstype=ubifs";
+		stdout-path = "serial0:115200n8";
+
+		/*
+		// das wird sonst auch vom triggerhappyd übernommen
+		linux,sysrq-reset-seq {
+                        keyset = <49
+                                  31
+                                  32>;
+                        timeout-ms = <3000>;
+                };
+                */
+	};
+
+	memory {
+		reg = <0x70000000 0x08000000>;
+	};
+
+	clocks {
+		slow_xtal {
+		      clock-frequency = <32768>;
+		};
+
+		main_xtal {
+		      clock-frequency = <12000000>;
+		};
+	};
+
+	ahb {
+		apb {
+			dbgu: serial@ffffee00 {
+				status = "okay";
+			};
+			
+			/* 
+			usart1: serial@fff90000 {
+				pinctrl-0 =
+					<&pinctrl_usart1
+					 &pinctrl_usart1_rts
+					 &pinctrl_usart1_cts>;
+				status = "disabled";
+			};
+			*/
+
+			macb0: ethernet@fffbc000 {
+				phy-mode = "rmii";
+				status = "okay";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				ethernet-phy@0 {
+					// irq_gpio = <&pioD 1 GPIO_ACTIVE_LOW>;
+					// interrupt-parent = <&pioD>;
+					// interrupts = <1 IRQ_TYPE_LEVEL_LOW>;
+					reg = <0>;
+					interrupts-extended = <&pioD 1 IRQ_TYPE_LEVEL_LOW>;
+				};			
+			};
+
+			watchdog@fffffd40 {
+				status = "okay";
+			};
+			
+			smc: smc@0xffffe800 {
+				compatible = "atmel,at91sam9260-smc", "syscon";
+				reg = <0xffffe800 0x200>;
+			};
+			
+			matrix: matrix@0xffffea00 {
+				compatible = "atmel,at91sam9g45-matrix", "syscon";
+				reg = <0xffffea00 0x200>;
+			};
+
+
+			mmc0: mmc@fff80000 {
+				pinctrl-0 = 
+					<&pinctrl_board_mmc0
+					 &pinctrl_mmc0_slot0_clk_cmd_dat0
+					 &pinctrl_mmc0_slot0_dat1_3>;
+				status = "disabled";
+				slot@0 {
+					reg = <0>;
+					bus-width = <4>;
+					cd-gpios = <&pioD 10 GPIO_ACTIVE_LOW>;
+				};
+			};
+
+			pinctrl@fffff200 {
+				mmc0 {
+					pinctrl_board_mmc0: mmc0-board {
+						atmel,pins =
+							<AT91_PIOD 10 AT91_PERIPH_GPIO AT91_PINCTRL_PULL_UP_DEGLITCH>;	/* PD10 gpio CD pin pull up and deglitch */
+					};
+				};
+				
+				pck0 {
+					pinctrl_board_pck0: pck0-board {
+						atmel,pins = <AT91_PIOD 12 AT91_PERIPH_B AT91_PINCTRL_NONE>;
+					};
+				};
+				
+
+				/* vorerst oder dauerhaft deaktiviert und noch zu editieren
+				pwm0 {
+					// XXX: leere Einträge brechen die Initialisierung des Pin-Controllers ab!
+					// XXX: Also immer den ganzen Knoten auskommentieren!
+					// TODO: hier fortsetzen, die Pin-Zuweisungen zu deklarieren
+					pinctrl_pwm_leds: pwm-led {
+						atmel,pins =
+							<AT91_PIOD 0  AT91_PERIPH_B AT91_PINCTRL_PULL_UP	// PD0 periph B
+							 AT91_PIOD 31 AT91_PERIPH_B AT91_PINCTRL_PULL_UP>;	// PD31 periph B
+					};
+				};
+				*/
+			};
+
+			/* vorerst deaktiviert
+			spi0: spi@fffa4000 {
+				status = "disabled";
+				cs-gpios = <&pioB 3 0>, <0>, <0>, <0>;
+			};
+			*/
+
+			/* vorerst deaktiviert
+			pwm0: pwm@fffb8000 {
+				status = "disabled";
+
+				pinctrl-names = "default";
+				// TODO: hier die Pin-Zuweisung ausführen
+				pinctrl-0 = <&pinctrl_pwm_leds>;
+			};
+			*/
+
+			gpbr: syscon@fffffd60 {
+				status = "okay";
+			};
+
+			rtc@fffffdb0 {
+				status = "okay";
+			};
+			
+			i2c0: i2c@fff84000 {
+				status = "okay";
+		
+				pwm16_0: pca9685@40 {
+					compatible = "nxp,pca9685-pwm";
+				// 	status = "disabled";
+					#pwm-cells = <2>;
+					reg = <0x40>;
+				//	invert;
+				//	open-drain;
+				};
+			};
+
+		};
+
+		nand0: nand@40000000 {
+			nand-bus-width = <8>;
+			nand-ecc-mode = "soft";	// der EEC-on-die Flash von Macronix (bei DYNA bekannt als NAND16) wird mit "soft" EEC-Mode betrieben und in SW abgefangen
+			nand-on-flash-bbt;
+			status = "okay";
+
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				bootstrap@0 {
+					label = "bootstrap";
+					reg = <0x0 0x20000>;
+				};
+
+				u-boot@20000 {
+					label = "u-boot";
+					reg = <0x20000 0x80000>;
+				};
+
+				u-boot-env1@a0000 {
+					label = "env1";
+					reg = <0xa0000 0x20000>;
+				};
+
+				u-boot-env2@c0000 {
+					label = "env2";
+					reg = <0xc0000 0x20000>;
+				};
+
+				linux-kernel@e0000 {
+					label = "linux";
+					reg = <0xe0000 0x5e0000>;
+				};
+
+				fdt@e0000 {
+					label = "fdt";
+					reg = <0x6c0000 0x020000>;
+				};
+
+				linux-rootfs@6e0000 {
+					label = "root";
+					reg = <0x6e0000 0xf920000>;
+				};
+			};
+		};
+
+		/*
+		sram1: sram@0x10000000 {
+			compatible = "mtd-ram";
+			reg = <0x10000000 0x80000>;
+			bank-width = <2>;
+	
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				ramdisk@0 {
+					label = "SRAM";
+					reg = <0x0 0x80000>;
+				};
+			};
+		};
+		*/
+
+		ebi: ebi@0x10000000 {
+			compatible = "atmel,at91sam9g45-ebi";
+			atmel,smc = <&smc>;
+			atmel,matrix = <&matrix>;
+			reg = <0x10000000 0x10000000
+			       // 0x40000000 0x10000000
+			       // 0x50000000 0x10000000
+			       0x60000000 0x10000000>;
+			#address-cells = <2>;
+			#size-cells = <1>;
+			ranges = <0 0x0 0x10000000 0x10000000
+				  // 3 0x0 0x40000000 0x10000000
+				  // 4 0x0 0x50000000 0x10000000
+				  5 0x0 0x60000000 0x10000000>;
+			clocks = <&mck>;
+
+			sram1: sram@0x10000000 {
+				compatible = "mtd-ram";
+				reg = <0 0 0x80000>;
+				bank-width = <2>;
+	
+				partitions {
+					compatible = "fixed-partitions";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					ramdisk@0 {
+						label = "SRAM";
+						reg = <0x0 0x80000>;
+					};
+				};
+			};
+
+			can0@0x60000000 {
+				compatible = "nxp,sja1000";
+				reg = <5 0 0x100>;
+				
+			        assigned-clocks = <&pck0>, <&mck>;
+				assigned-clock-parents = <&mck>;
+				assigned-clock-rates = <133333333>, <133333333>;
+
+				pinctrl-names = "default";
+				pinctrl-0 = <&pinctrl_board_pck0>;
+				
+				atmel,smc-bus-width = <8>;
+				atmel,smc-read-mode = "nrd";
+				atmel,smc-write-mode = "nwe";
+				atmel,smc-tdf-mode = "optimized";
+				atmel,smc-ncs-rd-setup-ns = <15>;
+				atmel,smc-nrd-setup-ns = <15>;
+				atmel,smc-ncs-rd-pulse-ns = <90>;
+				atmel,smc-nrd-pulse-ns = <90>;
+				atmel,smc-nrd-cycle-ns = <15>;
+				atmel,smc-ncs-wr-setup-ns = <15>;
+				atmel,smc-nwe-setup-ns = <15>;
+				atmel,smc-ncs-wr-pulse-ns = <68>;
+				atmel,smc-nwe-pulse-ns = <68>;
+				atmel,smc-nwe-cycle-ns = <90>;
+				atmel,smc-tdf-ns = <15>;
+			
+				interrupt-parent = <&pioD>;
+				interrupts = <7 IRQ_TYPE_LEVEL_LOW>;
+				
+				nxp,external-clock-frequency = <8000000>;
+				nxp,tx-output-config = <0x06>;
+				nxp,clock-out-frequency =<0>;
+				// nxp,no-comparator-bypass;
+				
+				status = "disabled";
+			};
+		
+		};
+
+	};
+
+	gpio-matrixkeypad {
+		compatible = "gpio-matrix-keypad";
+		
+		// status = "disabled";
+
+		debounce-delay-ms = <30>;
+		col-scan-delay-us = <100>;
+		wakeup-source;
+
+		gpio-activelow;
+		
+		row-gpios = <&pioA 1 0
+			     &pioA 0 0
+			     &pioD 11 0>;
+
+		col-gpios = <&pioA 2 0
+			     &pioB 27 0
+			     &pioB 26 0>;
+
+		// die Formel der nachfolgenden Einträge ist
+		// row << 24 | column << 16 | key-code
+		linux,keymap = <0x00000001 // 0 0 KEY_ESC - Escape
+				0x00010031 // 0 1 KEY_N   - Num
+				0x00020013 // 0 2 KEY_R   - Run
+
+				0x01000065 // 1 0 KEY_LINEFEED - Enter
+				0x0101001f // 1 1 KEY_S        - Save
+				0x0102002e // 1 2 KEY_C        - Clear
+
+				0x02000016 // 2 0 KEY_U       - Pfeil nach oben/rechts
+				0x02010020 // 2 1 KEY_D       - Pfeil nach unten/links
+				0x020200f0 // 2 2 KEY_UNKNOWN - unbenutzte Kombination
+				>;
+	};
+	
+	/*
+	gpio-inputs {
+		compatible = "gpio-keys";
+		status = "disabled";
+		
+		mmc0-present {
+			gpios = <&pioA 1 0>;
+			linux,code = <KEY_MMC>;
+		};
+	};
+	*/
+
+	i2c-gpio-1 {
+		compatible = "i2c-gpio";
+		status = "disabled";
+		
+		gpios = <&pioA 20 0 // sda
+			 &pioA 21 0 // scl
+			>;
+	//	i2c-gpio,sda-open-drain;
+	//	i2c-gpio,scl-open-drain;
+		i2c-gpio,delay-us = <3>;	/* ~100 kHz */
+		#address-cells = <1>;
+		#size-cells = <0>;
+		
+		pwm16_1: pca9685@40 {
+			compatible = "nxp,pca9685-pwm";
+		//	status = "disabled";
+			#pwm-cells = <2>;
+			reg = <0x40>;
+		//	invert;
+		//	open-drain;
+		};
+	};
+
+	i2c-gpio-2 {
+		compatible = "i2c-gpio";
+		// status = "disabled";
+
+		gpios = <&pioB 21 0 // sda, DISP-D6, PB21
+			 &pioB 20 0 // scl, DISP-D7, PB20
+			>;
+		// i2c-gpio,sda-open-drain;	// nicht einschalten, hat im Test nicht funktioniert
+		// i2c-gpio,scl-open-drain;	// nicht einschalten, hat im Test nicht funktioniert
+		i2c-gpio,delay-us = <3>;	// ~100 kHz
+		#address-cells = <1>;
+		#size-cells = <0>;
+		
+		pwm16_2: pca9685@40 {
+			compatible = "nxp,pca9685-pwm";
+		// 	status = "disabled";
+			#pwm-cells = <2>;
+			reg = <0x40>;
+		//	invert;
+		//	open-drain;
+		};
+	};
+
+	/*
+	gpioleds {
+		compatible = "gpio-leds";
+		status = "disabled";
+
+		led_disk {
+			label = "dyna::disk";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "nand-disk";
+		};
+
+		led_lan_rx {
+			label = "dyna::lan-rx";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "netdev";
+		};
+
+		led_lan_tx {
+			label = "dyna::lan-tx";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "netdev";
+		};
+
+		led_can_rx {
+			label = "dyna::can-rx";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "netdev";
+		};
+
+		led_can_tx {
+			label = "dyna::can-tx";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "netdev";
+		};
+
+		led_heartbeat {
+			label = "dyna::heartbeat";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "heartbeat";
+		};
+
+		led_cpu0 {
+			label = "dyna::cpu0";
+			// gpios = <&pioB 21 0>;
+			linux,default-trigger = "cpu0";
+		};
+	};
+	*/
+};
+

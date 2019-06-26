@@ -1,7 +1,0 @@
-## SECTION=test_suites
-
-config SERIAL_CMSPAR_TEST
-	tristate
-	prompt "serial-cmspar"
-	help
-	  FIXME

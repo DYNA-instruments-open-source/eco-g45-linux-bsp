@@ -1,7 +1,0 @@
-ptx-mkspec.diff
-remove-ordered.diff
-qt-embedded-linux-opensource-src-4.5.0-fix-prl-paths.diff
-fix-qthelp-deps.diff
-hide-cursor-at-startup.diff
-fix-examples.diff
-fix-qws-dnd.diff

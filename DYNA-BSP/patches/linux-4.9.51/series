@@ -1,0 +1,9 @@
+830-ledtrig_morse.patch
+831-ledtrig_netdev.patch
+832-ledtrig_usbdev.patch
+835-gpiodev.patch
+861-04_spi_gpio_implement_spi_delay.patch
+810-matrix-keypad-unload-fix.patch
+910-add-configfs-overlay.patch
+410-macronix-ecc-free-nand.patch
+

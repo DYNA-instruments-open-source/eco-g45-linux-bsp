@@ -1,0 +1,161 @@
+--- a/drivers/spi/spi-atmel.c
++++ b/drivers/spi/spi-atmel.c
+@@ -2,6 +2,8 @@
+  * Driver for Atmel AT32 and AT91 SPI Controllers
+  *
+  * Copyright (C) 2006 Atmel Corporation
++ * Copyright (C) 2014 DYNA Instruments GmbH Hamburg,
++ * Copyright (c) 2014 Johannes Lode <linuxer@quantentunnel.de>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -224,7 +226,7 @@ struct atmel_spi {
+ 	struct platform_device	*pdev;
+ 
+ 	struct spi_transfer	*current_transfer;
+-	unsigned long		current_remaining_bytes;
++	unsigned long current_remaining_bytes;
+ 	int			done_status;
+ 
+ 	struct completion	xfer_completion;
+@@ -237,7 +239,7 @@ struct atmel_spi {
+ 
+ 	bool			use_dma;
+ 	bool			use_pdc;
+-	/* dmaengine data */
++	/* dma engine data */
+ 	struct atmel_spi_dma	dma;
+ 
+ 	bool			keep_cs;
+@@ -372,9 +374,9 @@ static void atmel_spi_unlock(struct atme
+ }
+ 
+ static inline bool atmel_spi_use_dma(struct atmel_spi *as,
+-				struct spi_transfer *xfer)
++        struct spi_transfer *xfer)
+ {
+-	return as->use_dma && xfer->len >= DMA_MIN_BYTES;
++  return as->use_dma && xfer->len >= DMA_MIN_BYTES;
+ }
+ 
+ static int atmel_spi_dma_slave_config(struct atmel_spi *as,
+@@ -792,6 +794,7 @@ static void atmel_spi_pdc_next_xfer(stru
+ 	 * It should be doable, though. Just not now...
+ 	 */
+ 	spi_writel(as, IER, SPI_BIT(ENDRX) | SPI_BIT(OVRES));
++	smp_wmb();
+ 	spi_writel(as, PTCR, SPI_BIT(TXTEN) | SPI_BIT(RXTEN));
+ }
+ 
+@@ -845,7 +848,7 @@ static void atmel_spi_dma_unmap_xfer(str
+ 				 xfer->len, DMA_FROM_DEVICE);
+ }
+ 
+-static void atmel_spi_disable_pdc_transfer(struct atmel_spi *as)
++static inline void atmel_spi_disable_pdc_transfer(struct atmel_spi *as)
+ {
+ 	spi_writel(as, PTCR, SPI_BIT(RXTDIS) | SPI_BIT(TXTDIS));
+ }
+@@ -964,10 +967,11 @@ atmel_spi_pdc_interrupt(int irq, void *d
+ 		spi_writel(as, IDR, (SPI_BIT(RXBUFF) | SPI_BIT(ENDRX)
+ 				     | SPI_BIT(OVRES)));
+ 
+-		/* Clear any overrun happening while cleaning up */
+-		spi_readl(as, SR);
+-
+ 		as->done_status = -EIO;
++    smp_wmb();
++
++    /* Clear any overrun happening while cleaning up */
++    spi_readl(as, SR);
+ 
+ 		complete(&as->xfer_completion);
+ 
+@@ -1068,7 +1072,7 @@ static int atmel_spi_one_transfer(struct
+ 	u32			len;
+ 	struct atmel_spi_device	*asd;
+ 	int			timeout;
+-	int			ret;
++	int			ret = 0;
+ 
+ 	as = spi_master_get_devdata(master);
+ 
+@@ -1114,31 +1118,34 @@ static int atmel_spi_one_transfer(struct
+ 		reinit_completion(&as->xfer_completion);
+ 
+ 		if (as->use_pdc) {
+-			atmel_spi_pdc_next_xfer(master, msg, xfer);
++      atmel_spi_pdc_next_xfer(master, msg, xfer);
+ 		} else if (atmel_spi_use_dma(as, xfer)) {
+-			len = as->current_remaining_bytes;
++      len = as->current_remaining_bytes;
+ 			ret = atmel_spi_next_xfer_dma_submit(master,
+ 								xfer, &len);
+ 			if (ret) {
+ 				dev_err(&spi->dev,
+ 					"unable to use DMA, fallback to PIO\n");
+-				atmel_spi_next_xfer_pio(master, xfer);
++        atmel_spi_next_xfer_pio(master, xfer);
+ 			} else {
+-				as->current_remaining_bytes -= len;
+-			}
++        as->current_remaining_bytes -= len;
++      }
+ 		} else {
+ 			atmel_spi_next_xfer_pio(master, xfer);
+ 		}
+ 
++	  atmel_spi_unlock(as);
+ 		ret = wait_for_completion_timeout(&as->xfer_completion,
+ 							SPI_DMA_TIMEOUT);
++	  atmel_spi_lock(as);
++
+ 		if (WARN_ON(ret == 0)) {
+ 			dev_err(&spi->dev,
+-				"spi trasfer timeout, err %d\n", ret);
+-			as->done_status = -EIO;
++				"spi transfer timeout, err %d\n", ret);
++        as->done_status = -EIO;
+ 		} else {
+-			ret = 0;
+-		}
++        ret = 0;
++      }
+ 
+ 		if (as->done_status)
+ 			break;
+@@ -1178,7 +1185,7 @@ static int atmel_spi_one_transfer(struct
+ 			&& (atmel_spi_use_dma(as, xfer) || as->use_pdc))
+ 			atmel_spi_dma_unmap_xfer(master, xfer);
+ 
+-		return 0;
++		return ret;
+ 
+ 	} else {
+ 		/* only update length if no error */
+@@ -1237,7 +1244,7 @@ static int atmel_spi_transfer_one_messag
+ 		ret = atmel_spi_one_transfer(master, msg, xfer);
+ 		if (ret)
+ 			goto msg_done;
+-	}
++		}
+ 
+ 	if (as->use_pdc)
+ 		atmel_spi_disable_pdc_transfer(as);
+@@ -1395,7 +1402,7 @@ static int atmel_spi_probe(struct platfo
+ 	}
+ 
+ 	if (as->use_pdc)
+-		spi_writel(as, PTCR, SPI_BIT(RXTDIS) | SPI_BIT(TXTDIS));
++    atmel_spi_disable_pdc_transfer(as);
+ 	spi_writel(as, CR, SPI_BIT(SPIEN));
+ 
+ 	/* go! */
+@@ -1513,6 +1520,7 @@ static struct platform_driver atmel_spi_
+ module_platform_driver(atmel_spi_driver);
+ 
+ MODULE_DESCRIPTION("Atmel AT32/AT91 SPI Controller driver");
++MODULE_AUTHOR("Johannes Lode <linuxer@quantentunnel.de>");
+ MODULE_AUTHOR("Haavard Skinnemoen (Atmel)");
+ MODULE_LICENSE("GPL");
+ MODULE_ALIAS("platform:atmel_spi");

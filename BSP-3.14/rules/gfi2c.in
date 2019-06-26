@@ -1,7 +1,0 @@
-## SECTION=test_suites
-
-config GFI2C
-	tristate
-	prompt "gfi2c"
-	help
-	  I2C testing tool.

@@ -1,8 +1,0 @@
-## SECTION=test_suites
-
-config FBIOPAN_DISPLAY_TEST
-	tristate
-	prompt "fbiopan_display_test"
-	help
-	  Test to check if the buffer switching for double buffering works
-	  in a framebuffer driver.

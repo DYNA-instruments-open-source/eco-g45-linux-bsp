@@ -1,8 +1,0 @@
-## SECTION=shell_and_console
-
-config XCONFIG
-	tristate
-	prompt "xconfig"
-	help
-	  The xconfig tool offers editing of the XML system configuration
-	  data located in flash memory.

@@ -6,14 +6,14 @@ cd $prog_dir
 
 cat >.dockerignore <<EOign
 $(basename $0)
-BSP-3.14
+DYNA-BSP
 cached-distfiles
 EOign
 
 tar_args_exclude="--exclude-backups --exclude-vcs --no-xattrs"
 tar_args_owner="--numeric-owner --owner=4000 --group=4000"
 
-echo "checking local src distfiles..."
+echo "checking local dist distfiles..."
 tar_file=cached-distfiles.tar
 tar_target=cached-distfiles
 test -f $tar_file \
@@ -29,8 +29,8 @@ test -f $tar_file \
  || exit $?
 
 echo "checking BSP files..."
-tar_file=DYNA-ECO-G45_BSP_linux-3.14.tar
-tar_target=BSP-3.14
+tar_file=DYNA-ECO-G45_BSP_linux-4.9.tar
+tar_target=DYNA-BSP
 test -f $tar_file \
  && md5sum -c ${tar_target}.md5 2>/dev/null 1>&2 </dev/null \
  && { find $tar_target -type f | xargs md5sum; } >${tar_target}.md5 \
